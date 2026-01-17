@@ -27,7 +27,9 @@ import {
   RadioTower,
   Unplug,
   Microchip,
-  AlarmClock
+  AlarmClock,
+  Snowflake,
+  FlaskConical,
 
 } from "lucide-react";
 
@@ -63,20 +65,21 @@ const IGNORE_KEYS = new Set([
  */
 const SENSOR_CATALOG = [
   // Temperature
-  {
-    keywords: ["temp", "temperature", "t_c", "t_f", "heat","t","temp"],
-    icon: Thermometer,
-    unit: "°C",
-    tone: "hot",
-  },
+{
+  keywords: ["temp", "temperature", "temperature_c", "t_c", "t_f", "heat"],
+  icon: Thermometer,
+  unit: "°C",
+  tone: "hot",
+},
+
 
   // Humidity
-  {
-    keywords: ["hum", "humidity", "rh","h","humid","hum"],
-    icon: Droplets,
-    unit: "%",
-    tone: "wet",
-  },
+{
+  keywords: ["hum", "humidity", "humidity_rh", "rh", "humid"],
+  icon: Snowflake,
+  unit: "%",
+  tone: "wet",
+},
 
   // Pressure
   {
@@ -143,10 +146,10 @@ const SENSOR_CATALOG = [
 
   // pH
   {
-    keywords: ["ph", "acidity", "alkaline","Ph"],
+    keywords: ["acidity", "alkaline","Ph"],
     icon: Leaf,
     unit: "",
-    tone: "neutral",
+    tone: "plant",
   },
 
   // EC / TDS
@@ -267,11 +270,33 @@ function titleizeKey(k) {
 function pickSensorMeta(key) {
   const nk = normalizeKey(key);
 
+  // ✅ exact matches first (fixes: t/h/ph/n/p/k)
+  if (nk === "t") {
+    return { icon: Thermometer, unit: "°C", tone: "hot" };
+  }
+  if (nk === "h") {
+    return { icon: Snowflake, unit: "%", tone: "wet" };
+  }
+  if (nk === "ph") {
+    return { icon: FlaskConical, unit: "", tone: "plant" };
+  }
+  if (nk === "n") {
+    return { icon: Leaf, unit: "ppm", tone: "nitrogen" };
+  }
+  if (nk === "p") {
+    return { icon: Leaf, unit: "ppm", tone: "phosphorus" };
+  }
+  if (nk === "k") {
+    return { icon: Leaf, unit: "ppm", tone: "potassium" };
+  }
+
+  // ✅ then do keyword includes matching
   for (const item of SENSOR_CATALOG) {
     if (item.keywords.some((kw) => nk.includes(normalizeKey(kw)))) {
       return item;
     }
   }
+
   return { icon: Eye, unit: "", tone: "neutral" };
 }
 
