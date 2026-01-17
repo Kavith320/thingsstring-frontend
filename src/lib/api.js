@@ -1,8 +1,21 @@
+// src/lib/api.js
+
+import { getToken } from "@/lib/auth/storage";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
-export async function apiRequest(endpoint, { method = "GET", body, token } = {}) {
-  const headers = { "Content-Type": "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
+export async function apiRequest(
+  endpoint,
+  { method = "GET", body } = {}
+) {
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  const token = getToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
 
   const res = await fetch(`${API_URL}${endpoint}`, {
     method,
@@ -12,10 +25,16 @@ export async function apiRequest(endpoint, { method = "GET", body, token } = {})
 
   const text = await res.text();
   let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
 
   if (!res.ok) {
-    const msg = (data && data.message) ? data.message : `API error (${res.status})`;
+    const msg =
+      data?.message || `API error (${res.status})`;
     throw new Error(msg);
   }
 

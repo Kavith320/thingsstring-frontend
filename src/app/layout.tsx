@@ -1,5 +1,10 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
+
+
+
+
 
 import "./globals.css";
 
@@ -25,6 +30,22 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+        <head>
+        {/* ✅ Google Identity Services script */}
+        <Script
+          src="https://accounts.google.com/gsi/client"
+          strategy="afterInteractive"
+          id="theme-init"
+        >
+
+        {`
+            (function () {
+              const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+              document.documentElement.classList.toggle('dark', dark);
+            })();
+          `}
+          </Script>
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
@@ -33,3 +54,15 @@ export default function RootLayout({
     </html>
   );
 }
+
+
+ <head>
+        <Script id="theme-init" strategy="beforeInteractive">
+          {`
+            (function () {
+              const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+              document.documentElement.classList.toggle('dark', dark);
+            })();
+          `}
+        </Script>
+      </head>

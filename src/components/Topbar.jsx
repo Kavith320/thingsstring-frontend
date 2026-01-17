@@ -1,6 +1,6 @@
 "use client";
 
-import { logout } from "../lib/auth";
+import { logout } from "@/lib/auth/actions";
 import { useTheme } from "../hooks/useTheme";
 
 export default function Topbar({ title = "Dashboard" }) {
