@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Script from "next/script";
 import dynamic from "next/dynamic";
+import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 
 import { apiRequest } from "../../lib/api";
 import { setAuth } from "@/lib/auth/storage";
@@ -15,12 +16,9 @@ const IotBackground = dynamic(() => import("@/components/auth/IotBackground"), {
 
 export default function LoginClient() {
   const router = useRouter();
-
-  // ✅ safe for prerender (set later on client)
   const [nextPath, setNextPath] = useState("/dashboard");
 
   useEffect(() => {
-    // ✅ only runs in browser
     const p = new URLSearchParams(window.location.search).get("next");
     if (p) setNextPath(p);
   }, []);
@@ -63,11 +61,12 @@ export default function LoginClient() {
 
       <div className="relative z-10 min-h-screen flex items-center justify-center p-6">
         <div className="w-full max-w-md">
+          {/* Header */}
           <div className="mb-7 text-center">
             <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-white text-black font-bold shadow-lg shadow-white/10">
               TS
             </div>
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-white">
+            <h1 className="mt-3 text-2xl font-semibold text-white">
               ThingsString
             </h1>
             <p className="mt-1 text-sm text-gray-400">
@@ -75,6 +74,7 @@ export default function LoginClient() {
             </p>
           </div>
 
+          {/* Card */}
           <form
             onSubmit={handleLogin}
             className="rounded-3xl border border-white/15 bg-white/[0.06] p-7 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-2xl"
@@ -85,46 +85,57 @@ export default function LoginClient() {
               </div>
             )}
 
+            {/* Email */}
             <label className="block text-sm font-medium text-gray-200">
               Email
             </label>
-            <input
-              type="email"
-              placeholder="you@example.com"
-              className="mt-2 w-full rounded-2xl border border-white/10 bg-black/35 px-4 py-2.5 text-white placeholder:text-gray-500 outline-none transition focus:border-white/20 focus:ring-2 focus:ring-white/10"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
+            <div className="mt-2 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/35 px-4 py-2.5 focus-within:ring-2 focus-within:ring-white/10">
+              <Mail className="h-4 w-4 text-gray-400" />
+              <input
+                type="email"
+                placeholder="you@example.com"
+                className="w-full bg-transparent text-white placeholder:text-gray-500 outline-none"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
 
+            {/* Password */}
             <div className="mt-4">
               <label className="block text-sm font-medium text-gray-200">
                 Password
               </label>
 
-              <div className="mt-2 flex items-center gap-2">
+              <div className="mt-2 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/35 px-4 py-2.5 focus-within:ring-2 focus-within:ring-white/10">
+                <Lock className="h-4 w-4 text-gray-400" />
                 <input
                   type={showPw ? "text" : "password"}
                   placeholder="••••••••"
-                  className="w-full rounded-2xl border border-white/10 bg-black/35 px-4 py-2.5 text-white placeholder:text-gray-500 outline-none transition focus:border-white/20 focus:ring-2 focus:ring-white/10"
+                  className="w-full bg-transparent text-white placeholder:text-gray-500 outline-none"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
                 />
-
                 <button
                   type="button"
                   onClick={() => setShowPw((s) => !s)}
-                  className="shrink-0 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs text-gray-200 hover:bg-white/10 transition"
+                  className="text-gray-300 hover:text-white"
+                  aria-label="Toggle password visibility"
                 >
-                  {showPw ? "Hide" : "Show"}
+                  {showPw ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
                 </button>
               </div>
             </div>
 
+            {/* Submit */}
             <button
               disabled={loading}
-              className="mt-6 w-full rounded-2xl bg-white py-2.5 font-semibold text-black shadow-lg shadow-white/10 transition hover:bg-white/95 active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed"
+              className="mt-6 w-full rounded-2xl bg-white py-2.5 font-semibold text-black shadow-lg shadow-white/10 transition hover:bg-white/95 active:scale-[0.99] disabled:opacity-60"
             >
               {loading ? "Signing in..." : "Sign in"}
             </button>
@@ -136,10 +147,6 @@ export default function LoginClient() {
             </div>
 
             <GoogleButton onError={setError} onSuccessRedirect={nextPath} />
-
-            <p className="mt-5 text-center text-xs text-gray-400">
-              By signing in you agree to the platform usage policy.
-            </p>
           </form>
         </div>
       </div>
