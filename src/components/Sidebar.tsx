@@ -34,9 +34,9 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
     }, []);
 
     return (
-        <aside className="static w-full sm:w-72 shrink-0 border-r border-zinc-200 bg-zinc-50/50 backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-950/80 flex flex-col h-full sm:h-screen sticky top-0">
+        <aside className="flex flex-col h-full bg-zinc-50/50 backdrop-blur-xl dark:bg-zinc-950/80 border-r border-zinc-200 dark:border-zinc-800">
             {/* Header */}
-            <div className="p-6">
+            <div className="p-5 sm:p-6 italic">
                 <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-2xl bg-black text-white dark:bg-white dark:text-black flex items-center justify-center font-bold">
                         TS

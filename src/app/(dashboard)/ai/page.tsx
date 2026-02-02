@@ -247,48 +247,48 @@ export default function AiPage() {
     }
 
     return (
-        <div className="h-[calc(100vh-8rem)] flex flex-col gap-6">
+        <div className="h-full sm:h-[calc(100vh-8rem)] flex flex-col gap-4 sm:gap-6">
 
             {/* Top: System Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="rounded-3xl border border-zinc-200 bg-gradient-to-br from-white to-zinc-50 p-6 dark:border-zinc-800 dark:from-zinc-900 dark:to-zinc-950/50 shadow-sm relative overflow-hidden group">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                <div className="relative overflow-hidden group rounded-3xl border border-zinc-200 bg-gradient-to-br from-white to-zinc-50 p-4 sm:p-6 dark:border-zinc-800 dark:from-zinc-900 dark:to-zinc-950/50 shadow-sm">
                     <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                        <Activity className="w-24 h-24" />
+                        <Activity className="w-16 h-16 sm:w-24 sm:h-24" />
                     </div>
-                    <div className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">Actuators</div>
-                    <div className="text-3xl font-bold text-zinc-900 dark:text-white">
+                    <div className="text-[10px] sm:text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">Actuators</div>
+                    <div className="text-xl sm:text-3xl font-bold text-zinc-900 dark:text-white">
                         {metrics ? `${metrics.activeActuators} / ${metrics.totalActuators}` : "--"}
                     </div>
-                    <div className="text-xs text-zinc-400 mt-2">Active / Total Installed</div>
+                    <div className="text-[10px] sm:text-xs text-zinc-400 mt-1 sm:mt-2">Active / Total</div>
                 </div>
 
-                <div className="rounded-3xl border border-zinc-200 bg-gradient-to-br from-white to-zinc-50 p-6 dark:border-zinc-800 dark:from-zinc-900 dark:to-zinc-950/50 shadow-sm relative overflow-hidden group">
+                <div className="relative overflow-hidden group rounded-3xl border border-zinc-200 bg-gradient-to-br from-white to-zinc-50 p-4 sm:p-6 dark:border-zinc-800 dark:from-zinc-900 dark:to-zinc-950/50 shadow-sm">
                     <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                        <Cpu className="w-24 h-24" />
+                        <Cpu className="w-16 h-16 sm:w-24 sm:h-24" />
                     </div>
-                    <div className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">Realtime Sensors</div>
-                    <div className="text-3xl font-bold text-zinc-900 dark:text-white">
+                    <div className="text-[10px] sm:text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">Realtime Sensors</div>
+                    <div className="text-xl sm:text-3xl font-bold text-zinc-900 dark:text-white">
                         {metrics ? metrics.totalSensors : "--"}
                     </div>
-                    <div className="text-xs text-zinc-400 mt-2">
-                        Across {metrics ? metrics.onlineDevices : "--"} active devices
+                    <div className="text-[10px] sm:text-xs text-zinc-400 mt-1 sm:mt-2">
+                        {metrics ? metrics.onlineDevices : "--"} active devices
                     </div>
                 </div>
 
-                <div className="rounded-3xl border border-zinc-200 bg-gradient-to-br from-white to-zinc-50 p-6 dark:border-zinc-800 dark:from-zinc-900 dark:to-zinc-950/50 shadow-sm relative overflow-hidden group">
+                <div className="relative overflow-hidden group rounded-3xl border border-zinc-200 bg-gradient-to-br from-white to-zinc-50 p-4 sm:p-6 dark:border-zinc-800 dark:from-zinc-900 dark:to-zinc-950/50 shadow-sm col-span-1 sm:col-span-2 lg:col-span-1">
                     <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                        <BrainCircuit className="w-24 h-24" />
+                        <BrainCircuit className="w-16 h-16 sm:w-24 sm:h-24" />
                     </div>
-                    <div className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">AI Status</div>
-                    <div className="text-3xl font-bold text-emerald-500 flex items-center gap-2">
-                        Active <span className="relative flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span></span>
+                    <div className="text-[10px] sm:text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">AI Status</div>
+                    <div className="text-xl sm:text-3xl font-bold text-emerald-500 flex items-center gap-2">
+                        Active <span className="relative flex h-2 w-2 sm:h-3 sm:w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 sm:h-3 sm:w-3 bg-emerald-500"></span></span>
                     </div>
-                    <div className="text-xs text-zinc-400 mt-2">Hybrid Processing Enabled</div>
+                    <div className="text-[10px] sm:text-xs text-zinc-400 mt-1 sm:mt-2">Hybrid Enabled</div>
                 </div>
             </div>
 
             {/* Bottom: Chat Interface */}
-            <div className="flex-1 min-h-0 rounded-3xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/60 shadow-xl flex flex-col overflow-hidden">
+            <div className="flex-1 min-h-[400px] rounded-3xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/60 shadow-xl flex flex-col overflow-hidden">
                 {/* Header */}
                 <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-3 bg-zinc-50/50 dark:bg-zinc-900/50">
                     <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
@@ -301,18 +301,18 @@ export default function AiPage() {
                 </div>
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-4" ref={scrollRef}>
+                <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4" ref={scrollRef}>
                     {messages.map((m, i) => (
                         <div key={i} className={cn("flex w-full", m.role === "user" ? "justify-end" : "justify-start")}>
                             <div className={cn(
-                                "max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed",
+                                "max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm leading-relaxed",
                                 m.role === "user"
                                     ? "bg-zinc-900 text-white rounded-br-sm dark:bg-white dark:text-black shadow-md"
                                     : "bg-zinc-100 text-zinc-800 rounded-bl-sm dark:bg-zinc-800/80 dark:text-zinc-200"
                             )}>
                                 {/* Render markdown-like bolding */}
                                 {m.content.split("\n").map((line, li) => (
-                                    <p key={li} dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') }} />
+                                    <p key={li} className="mb-1 last:mb-0" dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') }} />
                                 ))}
                             </div>
                         </div>
@@ -329,39 +329,39 @@ export default function AiPage() {
                 </div>
 
                 {/* Input */}
-                <div className="p-4 bg-zinc-50/50 dark:bg-zinc-900/30 border-t border-zinc-100 dark:border-zinc-800">
+                <div className="p-3 sm:p-4 bg-zinc-50/50 dark:bg-zinc-900/30 border-t border-zinc-100 dark:border-zinc-800">
                     <form
                         onSubmit={(e) => { e.preventDefault(); handleSend(); }}
-                        className="relative flex items-center shadow-sm gap-2"
+                        className="relative flex items-center shadow-sm gap-2 sm:gap-3"
                     >
                         {/* Voice Input Button */}
                         <button
                             type="button"
                             onClick={toggleListening}
                             className={cn(
-                                "p-3 rounded-2xl transition-all shadow-sm",
+                                "p-2 sm:p-3 rounded-2xl transition-all shadow-sm shrink-0",
                                 isListening
                                     ? "bg-red-500 text-white animate-pulse"
                                     : "bg-white text-zinc-500 hover:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
                             )}
                             title="Voice Input"
                         >
-                            {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                            {isListening ? <MicOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Mic className="w-4 h-4 sm:w-5 sm:h-5" />}
                         </button>
 
                         <div className="relative flex-1">
                             <input
-                                className="w-full h-12 rounded-2xl border-none bg-zinc-200/50 pl-5 pr-14 text-sm text-zinc-900 focus:ring-2 focus:ring-indigo-500/20 outline-none dark:bg-zinc-900 dark:text-white placeholder:text-zinc-500 transition-all font-medium"
-                                placeholder={isListening ? "Listening..." : "Ask about your sensors (e.g., 'How many offline devices?')..."}
+                                className="w-full h-10 sm:h-12 rounded-2xl border-none bg-zinc-200/50 pl-4 sm:pl-5 pr-12 sm:pr-14 text-xs sm:text-sm text-zinc-900 focus:ring-2 focus:ring-indigo-500/20 outline-none dark:bg-zinc-900 dark:text-white placeholder:text-zinc-500 transition-all font-medium"
+                                placeholder={isListening ? "Listening..." : "Ask me anything..."}
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                             />
                             <button
                                 type="submit"
                                 disabled={!input.trim() || thinking}
-                                className="absolute right-2 top-1.5 p-2 rounded-xl bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-50 disabled:hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-500/20"
+                                className="absolute right-1.5 top-1.5 p-1.5 sm:right-2 sm:top-1.5 sm:p-2 rounded-xl bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-50 disabled:hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-500/20"
                             >
-                                <Send className="w-4 h-4" />
+                                <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                             </button>
                         </div>
                     </form>

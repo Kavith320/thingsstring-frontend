@@ -20,12 +20,12 @@ export default function DashboardLayout({ children }) {
           <>
             {/* Backdrop */}
             <div
-              className="fixed inset-0 z-40 bg-black/50 md:hidden"
+              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity animate-in fade-in duration-300 md:hidden"
               onClick={() => setSidebarOpen(false)}
             />
 
             {/* Drawer */}
-            <aside className="fixed inset-y-0 left-0 z-50 w-72 bg-zinc-50 dark:bg-zinc-950 md:hidden shadow-xl">
+            <aside className="fixed inset-y-0 left-0 z-50 w-72 bg-white dark:bg-zinc-950 md:hidden shadow-2xl transform transition-transform animate-in slide-in-from-left duration-300 ring-1 ring-white/10">
               <Sidebar onNavigate={() => setSidebarOpen(false)} />
             </aside>
           </>

@@ -154,3 +154,23 @@ body {
   animation: ts-softline 3.8s ease-in-out infinite;
   will-change: opacity;
 }
+
+/* Signal Pulse Animation */
+@keyframes ts-signal-ring {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(3);
+    opacity: 0;
+  }
+}
+
+.animate-ts-signal {
+  animation: ts-signal-ring 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.ts-signal-delayed {
+  animation-delay: 1s;
+}

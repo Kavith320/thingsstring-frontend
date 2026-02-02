@@ -40,7 +40,11 @@ export default function LoginClient() {
         body: { email, password },
       });
 
-      setAuth({ token: data.token, userId8: data.user?.userId8 });
+      setAuth({
+        token: data.token,
+        userId: data.user?._id,
+        userId8: data.user?.userId8
+      });
       router.push(nextPath);
     } catch (err) {
       setError(err.message || "Login failed");

@@ -19,6 +19,7 @@ import {
     Search
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import LoadingSignal from "@/components/LoadingSignal";
 
 /* -------- Types -------- */
 interface Telemetry {
@@ -216,12 +217,16 @@ export default function DashboardPage() {
     return (
         <div className="space-y-8">
             {/* Header */}
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                    <h2 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">System Overview</h2>
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-4">
+                    <div>
+                        <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">System Overview</h2>
+                        <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Real-time status of your IoT fleet</p>
+                    </div>
+                    {loading && <LoadingSignal size="sm" className="hidden sm:flex" />}
                 </div>
 
-                <div className="relative group">
+                <div className="relative group w-full sm:w-auto">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-zinc-600 dark:group-focus-within:text-zinc-200 transition-colors" />
                     <input
                         value={query}
@@ -234,31 +239,29 @@ export default function DashboardPage() {
 
             {/* Error State */}
             {error && (
-                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-600 dark:border-red-900/30 dark:bg-red-900/10 dark:text-red-400">
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-600 dark:border-red-900/30 dark:bg-red-900/10 dark:text-red-400 animate-in fade-in zoom-in-95 duration-200">
                     {error}
                 </div>
             )}
 
-            {/* Loading Skeleton */}
+            {/* Loading Overlay */}
             {loading && !devices.length && (
-                <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                    {[1, 2, 3].map(i => (
-                        <div key={i} className="h-48 rounded-3xl bg-zinc-100 dark:bg-zinc-800/50 animate-pulse" />
-                    ))}
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-50/10 dark:bg-zinc-950/10 backdrop-blur-md">
+                    <LoadingSignal size="lg" />
                 </div>
             )}
 
             {/* Empty State */}
             {!loading && rows.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-12 text-center rounded-3xl border border-dashed border-zinc-200 dark:border-zinc-800">
-                    <CircleDot className="w-12 h-12 text-zinc-300 dark:text-zinc-700 mb-3" />
-                    <p className="text-zinc-900 dark:text-white font-medium">No devices found</p>
-                    <p className="text-zinc-500 text-sm">Waiting for telemetry connection...</p>
+                <div className="flex flex-col items-center justify-center py-16 text-center rounded-3xl border border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/20">
+                    <CircleDot className="w-12 h-12 text-zinc-300 dark:text-zinc-700 mb-4" />
+                    <p className="text-zinc-900 dark:text-white font-bold text-lg">No devices found</p>
+                    <p className="text-zinc-500 text-sm mt-1 max-w-xs mx-auto">Waiting for your first telemetry packet to arrive...</p>
                 </div>
             )}
 
             {/* Device Grid */}
-            <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
                 {rows.map((dev) => (
                     <a
                         key={dev.id}

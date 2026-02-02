@@ -1,9 +1,7 @@
 import { jwtDecode } from "jwt-decode";
+import { getToken, getUserId, getUserId8, clearAuth } from "./auth/storage";
 
-export function getToken() {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("token");
-}
+export { getToken };
 
 export function getUser() {
   const token = getToken();
@@ -31,8 +29,9 @@ export function getUser() {
     }
 
     return {
+      id: getUserId() || decoded.sub || decoded.id || null,
       name,
-      email: decoded.email || decoded.sub || "No email",
+      email: decoded.email || "No email",
       role: decoded.role || "user"
     };
   } catch (e) {
@@ -41,6 +40,6 @@ export function getUser() {
 }
 
 export function logout() {
-  localStorage.removeItem("token");
+  clearAuth();
   window.location.href = "/login";
 }

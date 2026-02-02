@@ -6,6 +6,7 @@ import { apiRequest } from "../../../../lib/api";
 
 import TelemetryGraph from "@/components/devices/TelemetryGraph";
 import SensorsGrid from "@/components/devices/SensorsGrid";
+import LoadingSignal from "@/components/LoadingSignal";
 
 /* ---------------- helpers: time + online ---------------- */
 
@@ -69,12 +70,12 @@ function getActLiveState(actKey, telemetryActuators, act) {
 
 function Card({ title, right, children }) {
   return (
-    <div className="rounded-2xl border shadow-sm border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/60">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
-        <div className="font-semibold">{title}</div>
+    <div className="rounded-3xl border shadow-sm border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/40 backdrop-blur-md overflow-hidden transition-all duration-300">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-5 py-4 border-b border-zinc-100 dark:border-zinc-800/50">
+        <div className="font-bold text-zinc-900 dark:text-white tracking-tight">{title}</div>
         {right ? <div className="shrink-0">{right}</div> : null}
       </div>
-      <div className="p-4">{children}</div>
+      <div className="p-4 sm:p-6">{children}</div>
     </div>
   );
 }
@@ -84,8 +85,8 @@ function Badge({ tone = "neutral", children }) {
     tone === "green"
       ? "bg-green-500/10 border-green-500/30 text-green-600 dark:text-green-400"
       : tone === "red"
-      ? "bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-300"
-      : "bg-zinc-500/10 border-zinc-500/30 text-zinc-700 dark:text-zinc-200";
+        ? "bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-300"
+        : "bg-zinc-500/10 border-zinc-500/30 text-zinc-700 dark:text-zinc-200";
 
   return (
     <span className={`text-xs px-2 py-1 rounded-full border ${cls}`}>
@@ -102,8 +103,8 @@ function StateBadge({ state }) {
   const cls = on
     ? "bg-green-500/10 border-green-500/30 text-green-600 dark:text-green-400"
     : off
-    ? "bg-zinc-500/10 border-zinc-500/30 text-zinc-700 dark:text-zinc-200"
-    : "bg-yellow-500/10 border-yellow-500/30 text-yellow-700 dark:text-yellow-300";
+      ? "bg-zinc-500/10 border-zinc-500/30 text-zinc-700 dark:text-zinc-200"
+      : "bg-yellow-500/10 border-yellow-500/30 text-yellow-700 dark:text-yellow-300";
 
   return (
     <span className={`text-xs px-2 py-1 rounded-full border whitespace-nowrap ${cls}`}>
@@ -329,63 +330,65 @@ export default function DeviceDetailsPage() {
   const actuatorCount = Object.keys(meta.controlActuators || {}).length;
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 py-4 space-y-4">
+    <div className="mx-auto w-full max-w-6xl px-3 sm:px-6 lg:px-8 py-4 space-y-4">
       {/* Header */}
-      <div className="rounded-2xl border p-4 sm:p-5 border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/60">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <div className="text-xl sm:text-2xl font-semibold truncate">{meta.name}</div>
+      <div className="rounded-3xl border p-5 sm:p-6 border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/40 shadow-sm">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 space-y-1">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-white truncate">
+              {meta.name}
+            </h1>
 
-            <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400 break-all">
-              ID:{" "}
-              <span className="font-medium text-zinc-900 dark:text-zinc-100">
+            <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+              <span className="font-mono text-xs px-2 py-0.5 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
                 {meta.id}
               </span>
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Badge>{`FW: ${meta.firmware}`}</Badge>
+            <div className="pt-3 flex flex-wrap gap-2">
+              <Badge>{`V: ${meta.firmware}`}</Badge>
               <Badge>{`Model: ${meta.model}`}</Badge>
               <Badge tone={meta.online ? "green" : "red"}>
                 {meta.online ? "ONLINE" : "OFFLINE"}
               </Badge>
-              {secsAgo !== null && <Badge>{`Seen: ${secsAgo}s ago`}</Badge>}
+              {secsAgo !== null && <Badge>{`Updated: ${secsAgo}s ago`}</Badge>}
             </div>
 
-            <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-              Offline if telemetry age &gt; 60s • Current age: {Math.round(meta.ageMs / 1000)}s
+            <div className="pt-2 text-[10px] text-zinc-400 uppercase tracking-widest font-medium">
+              Refresh Interval: 5s • Last Ping: {Math.round(meta.ageMs / 1000)}s ago
             </div>
 
             {msg && (
-              <div className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
+              <div className="mt-4 p-3 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-xs font-medium text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-500/20 animate-in fade-in slide-in-from-top-1">
                 {msg}
               </div>
             )}
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+          <div className="flex flex-col sm:flex-row gap-2.5 w-full lg:w-auto">
             <a
               href={`/devices/${encodeURIComponent(meta.id)}/schedules`}
-              className="w-full sm:w-auto text-center rounded-xl border px-3 py-2 text-sm border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+              className="flex-1 sm:flex-none inline-flex items-center justify-center rounded-2xl border border-zinc-200 px-6 py-3 text-sm font-bold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900 transition-all active:scale-95 shadow-sm"
             >
               Schedules
             </a>
 
-            <Btn
+            <button
               onClick={() => {
                 loadDeviceOnce();
                 loadHistoryOnce();
               }}
+              className="flex-1 sm:flex-none inline-flex items-center justify-center rounded-2xl bg-zinc-900 px-6 py-3 text-sm font-bold text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 transition-all active:scale-95 shadow-lg shadow-zinc-900/10 dark:shadow-white/5"
             >
-              Refresh
-            </Btn>
+              Force Refresh
+            </button>
           </div>
         </div>
       </div>
 
       {/* ✅ Sensors tiles */}
       <Card title="Sensors (Latest)">
-       <SensorsGrid lastTelemetry={device?.last_telemetry} />
+        <SensorsGrid lastTelemetry={device?.last_telemetry} />
 
       </Card>
 
@@ -455,8 +458,8 @@ export default function DeviceDetailsPage() {
                   </div>
 
                   {rowBusy && (
-                    <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                      Sending…
+                    <div className="mt-4 flex items-center justify-center animate-in fade-in duration-300">
+                      <LoadingSignal size="sm" />
                     </div>
                   )}
                 </div>
