@@ -10,7 +10,7 @@ import { apiRequest } from "../../lib/api";
 import { setAuth } from "@/lib/auth/storage";
 import GoogleButton from "@/components/auth/GoogleButton";
 
-const IotBackground = dynamic(() => import("@/components/auth/IotBackground"), {
+const SimpleDotsBackground = dynamic(() => import("@/components/common/SimpleDotsBackground"), {
   ssr: false,
 });
 
@@ -59,9 +59,8 @@ export default function LoginClient() {
 
       {/* Background */}
       <div className="absolute inset-0 -z-0">
-        <IotBackground />
+        <SimpleDotsBackground forceTheme="dark" />
         <div className="absolute inset-0 bg-black/40" />
-        <div className="absolute inset-0 [box-shadow:inset_0_0_200px_rgba(0,0,0,0.85)]" />
       </div>
 
       {/* Content */}

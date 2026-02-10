@@ -26,7 +26,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         {/* ✅ Dark mode init (runs before paint) */}
         <Script id="theme-init" strategy="beforeInteractive">
@@ -47,6 +47,7 @@ export default function RootLayout({
 
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        suppressHydrationWarning
       >
         {children}
 
