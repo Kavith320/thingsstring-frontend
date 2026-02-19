@@ -9,6 +9,7 @@ import {
     Settings,
     LogOut,
     User,
+    Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getUser, logout } from "@/lib/auth";
@@ -17,6 +18,7 @@ import { useEffect, useState } from "react";
 const nav = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/devices", label: "Devices", icon: Radio },
+    { href: "/automation", label: "Automation", icon: Zap },
     { href: "/ai", label: "AI Assistant", icon: Bot },
     { href: "/settings", label: "Settings", icon: Settings },
 ];
