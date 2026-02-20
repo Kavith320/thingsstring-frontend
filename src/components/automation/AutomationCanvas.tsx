@@ -523,7 +523,7 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                                 Remove Node
                             </button>
 
-                            {nodes.find(n => n.id === menu.id)?.data?._id && (
+                            {Boolean(nodes.find(n => n.id === menu.id)?.data?._id) && (
                                 <div className="mt-1.5 pt-1.5 border-t border-zinc-100 dark:border-zinc-800">
                                     <button
                                         onClick={(e) => {
