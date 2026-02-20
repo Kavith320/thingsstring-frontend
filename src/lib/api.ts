@@ -36,7 +36,8 @@ export async function apiRequest<T = any>(
     }
 
     if (!res.ok) {
-        const msg = data?.message || `API error (${res.status})`;
+        console.error(`API Error (${res.status}):`, data);
+        const msg = data?.message || data?.error || `API error (${res.status})`;
         throw new Error(msg);
     }
 

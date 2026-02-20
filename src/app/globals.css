@@ -1,6 +1,10 @@
 @import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
 
-html, body { height: 100%; }
+html,
+body {
+  height: 100%;
+}
 
 
 
@@ -16,8 +20,8 @@ body {
 /* ✅ Dark */
 .dark body {
   background:
-    radial-gradient(1200px 600px at 50% -20%, rgba(99,102,241,0.20) 0%, transparent 60%),
-    radial-gradient(900px 500px at 0% 10%, rgba(16,185,129,0.12) 0%, transparent 55%),
+    radial-gradient(1200px 600px at 50% -20%, rgba(99, 102, 241, 0.20) 0%, transparent 60%),
+    radial-gradient(900px 500px at 0% 10%, rgba(16, 185, 129, 0.12) 0%, transparent 55%),
     linear-gradient(to bottom, #07070a, #0b0b12);
   color: #f4f4f5;
 }
@@ -28,13 +32,13 @@ body {
   backdrop-filter: blur(12px);
   border: 1px solid rgba(17, 24, 39, 0.08);
   border-radius: 1.25rem;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
 }
 
 .dark .auth-card {
   background: rgba(12, 12, 18, 0.78);
   border: 1px solid rgba(148, 163, 184, 0.14);
-  box-shadow: 0 16px 40px rgba(0,0,0,0.45);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
 }
 
 /* Inputs */
@@ -51,7 +55,7 @@ body {
 .auth-input:focus {
   outline: none;
   border-color: #000;
-  box-shadow: 0 0 0 3px rgba(0,0,0,0.10);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.10);
 }
 
 .dark .auth-input {
@@ -61,8 +65,8 @@ body {
 }
 
 .dark .auth-input:focus {
-  border-color: rgba(255,255,255,0.55);
-  box-shadow: 0 0 0 3px rgba(255,255,255,0.12);
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12);
 }
 
 /* Button */
@@ -78,18 +82,19 @@ body {
 
 .auth-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 10px 24px rgba(0,0,0,0.25);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
 }
 
 .dark .auth-btn {
   background: linear-gradient(135deg, #111827, #000);
-  box-shadow: 0 10px 28px rgba(0,0,0,0.50);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.50);
 }
 
 /* Small text */
 .dark .muted {
   color: rgba(244, 244, 245, 0.65);
 }
+
 .muted {
   color: rgba(10, 10, 10, 0.65);
 }
@@ -101,6 +106,7 @@ body {
     opacity: 0;
     transform: translateY(14px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -114,9 +120,11 @@ body {
 .ts-delay-1 {
   animation-delay: 80ms;
 }
+
 .ts-delay-2 {
   animation-delay: 140ms;
 }
+
 .ts-delay-3 {
   animation-delay: 200ms;
 }
@@ -132,9 +140,20 @@ body {
 /* ===== IoT background animations (required) ===== */
 
 @keyframes ts-softdrift {
-  0%   { transform: translate(0px, 0px); opacity: 0.55; }
-  50%  { transform: translate(var(--dx), var(--dy)); opacity: 0.85; }
-  100% { transform: translate(0px, 0px); opacity: 0.55; }
+  0% {
+    transform: translate(0px, 0px);
+    opacity: 0.55;
+  }
+
+  50% {
+    transform: translate(var(--dx), var(--dy));
+    opacity: 0.85;
+  }
+
+  100% {
+    transform: translate(0px, 0px);
+    opacity: 0.55;
+  }
 }
 
 .animate-ts-softdrift {
@@ -145,9 +164,17 @@ body {
 }
 
 @keyframes ts-softline {
-  0%   { opacity: 0.06; }
-  50%  { opacity: 0.28; }
-  100% { opacity: 0.06; }
+  0% {
+    opacity: 0.06;
+  }
+
+  50% {
+    opacity: 0.28;
+  }
+
+  100% {
+    opacity: 0.06;
+  }
 }
 
 .animate-ts-softline {
@@ -161,6 +188,7 @@ body {
     transform: scale(0.5);
     opacity: 0.8;
   }
+
   100% {
     transform: scale(3);
     opacity: 0;
