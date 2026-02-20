@@ -22,6 +22,11 @@ export interface Device {
     name: string;
     config?: {
         actuators?: Record<string, any>;
+        device?: {
+            device_id?: string;
+            name?: string;
+            model?: string;
+        };
     };
     last_telemetry?: Record<string, any>;
 }

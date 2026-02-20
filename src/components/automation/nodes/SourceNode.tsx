@@ -1,14 +1,19 @@
 "use client";
 
-import { Handle, Position } from "@xyflow/react";
+import { useState } from "react";
+import { Handle, Position, useReactFlow } from "@xyflow/react";
 import { Activity, Cpu, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export default function SourceNode({ data }: { data: any }) {
+export default function SourceNode({ id, data }: { id: string, data: any }) {
+    const { updateNodeData } = useReactFlow();
     const options = data.options || [];
+    const [currentPath, setCurrentPath] = useState(data.metricPath || "");
 
     const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        data.metricPath = e.target.value;
+        const val = e.target.value;
+        setCurrentPath(val);
+        updateNodeData(id, { metricPath: val });
     };
 
     return (
@@ -18,8 +23,11 @@ export default function SourceNode({ data }: { data: any }) {
                     <Activity className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-indigo-200">Sensor Device</div>
-                    <div className="text-sm font-black truncate pr-1">{data.name || "ESP32 Sensor"}</div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-indigo-200 flex items-center gap-2">
+                        Sensor Node
+                        <span className="bg-indigo-700/50 px-1.5 py-0.5 rounded text-[8px] font-mono border border-indigo-400/30">{data.deviceId}</span>
+                    </div>
+                    <div className="text-xs font-black truncate pr-1">{data.name || "Sensor Device"}</div>
                 </div>
             </div>
 
@@ -29,7 +37,7 @@ export default function SourceNode({ data }: { data: any }) {
                     <div className="relative mt-1.5 overflow-hidden rounded-2xl bg-white/10 backdrop-blur-lg border border-white/20 hover:bg-white/20 transition-all">
                         <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-indigo-200 pointer-events-none" />
                         <select
-                            defaultValue={data.metricPath}
+                            value={currentPath}
                             onChange={handleChange}
                             className="w-full bg-transparent pl-4 pr-10 py-3 text-xs font-bold outline-none cursor-pointer appearance-none"
                         >

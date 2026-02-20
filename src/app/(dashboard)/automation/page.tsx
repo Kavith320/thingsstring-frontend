@@ -47,13 +47,27 @@ export default function AutomationPage() {
                 ? `/api/automation/flows/${flowData._id}`
                 : "/api/automation/flows";
 
+            const { _id, ...body } = flowData;
+
             await apiRequest(url, {
                 method: isUpdate ? "PUT" : "POST",
-                body: flowData
+                body: body
             });
             await fetchData(); // Refresh data to get correct IDs fo new nodes
         } catch (e: any) {
             console.error("Failed to deploy flow from canvas", e);
+            throw e;
+        }
+    }
+
+    async function deleteFlow(flowId: string) {
+        try {
+            await apiRequest(`/api/automation/flows/${flowId}`, {
+                method: "DELETE"
+            });
+            await fetchData();
+        } catch (e: any) {
+            console.error("Failed to delete flow", e);
             throw e;
         }
     }
@@ -119,6 +133,7 @@ export default function AutomationPage() {
                         devices={devices}
                         initialFlows={flows}
                         onSave={saveFlowFromCanvas}
+                        onDelete={deleteFlow}
                     />
                 </div>
             </div>

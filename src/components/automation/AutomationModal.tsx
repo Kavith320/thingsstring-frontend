@@ -169,11 +169,14 @@ export default function AutomationModal({ flow, onClose, onSave }: AutomationMod
                                         className="w-full pl-11 pr-4 py-3 rounded-2xl border border-indigo-500/10 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm appearance-none"
                                     >
                                         <option value="">Select Sensor Device</option>
-                                        {devices.map(d => (
-                                            <option key={d.deviceId} value={d.deviceId}>
-                                                {d.name || d.deviceId} {d.name ? `(${d.deviceId})` : ''}
-                                            </option>
-                                        ))}
+                                        {devices.map(d => {
+                                            const name = d.config?.device?.name || d.config?.device?.model || d.name || d.deviceId || "Unnamed Device";
+                                            return (
+                                                <option key={d.deviceId} value={d.deviceId}>
+                                                    {name} {d.name || d.config?.device?.name ? `(${d.deviceId})` : ''}
+                                                </option>
+                                            );
+                                        })}
                                     </select>
                                 </div>
                             </label>
@@ -245,11 +248,14 @@ export default function AutomationModal({ flow, onClose, onSave }: AutomationMod
                                         className="w-full pl-11 pr-4 py-3 rounded-2xl border border-emerald-500/10 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-sm appearance-none"
                                     >
                                         <option value="">Select Actuator Device</option>
-                                        {devices.map(d => (
-                                            <option key={d.deviceId} value={d.deviceId}>
-                                                {d.name || d.deviceId} {d.name ? `(${d.deviceId})` : ''}
-                                            </option>
-                                        ))}
+                                        {devices.map(d => {
+                                            const name = d.config?.device?.name || d.config?.device?.model || d.name || d.deviceId || "Unnamed Device";
+                                            return (
+                                                <option key={d.deviceId} value={d.deviceId}>
+                                                    {name} {d.name || d.config?.device?.name ? `(${d.deviceId})` : ''}
+                                                </option>
+                                            );
+                                        })}
                                     </select>
                                 </div>
                             </label>

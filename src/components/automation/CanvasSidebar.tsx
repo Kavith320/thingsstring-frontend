@@ -59,7 +59,7 @@ export default function CanvasSidebar({ devices }: CanvasSidebarProps) {
                                 isCollapsed ? "p-3" : "p-4 gap-4"
                             )}
                             draggable
-                            onDragStart={(e) => onDragStart(e, "logic", { deltaThreshold: 1.0, intervalSec: 30 })}
+                            onDragStart={(e) => onDragStart(e, "logic", { deltaThreshold: 1.0, intervalSec: 30, cooldownSec: 60 })}
                             title={isCollapsed ? "Delta Filter" : ""}
                         >
                             <div className={cn(
@@ -93,6 +93,13 @@ export default function CanvasSidebar({ devices }: CanvasSidebarProps) {
 
                                 if (telemetryKeys.length === 0 && actuators.length === 0) return null;
 
+                                const displayName =
+                                    device.config?.device?.name ||
+                                    device.config?.device?.model ||
+                                    device.name ||
+                                    device.deviceId ||
+                                    "Unnamed Device";
+
                                 return (
                                     <div key={device.deviceId} className={cn(
                                         "flex flex-col rounded-3xl border border-zinc-100 dark:border-zinc-900 bg-zinc-50/50 dark:bg-zinc-900/40 transition-all",
@@ -104,7 +111,7 @@ export default function CanvasSidebar({ devices }: CanvasSidebarProps) {
                                                     <Cpu className="w-4 h-4 text-zinc-500" />
                                                 </div>
                                                 <div className="min-w-0">
-                                                    <div className="text-xs font-black dark:text-white truncate">{device.name}</div>
+                                                    <div className="text-xs font-black dark:text-white truncate">{displayName}</div>
                                                     <div className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest">{device.deviceId}</div>
                                                 </div>
                                             </div>
@@ -133,7 +140,7 @@ export default function CanvasSidebar({ devices }: CanvasSidebarProps) {
                                                     )}>
                                                         <Activity className={isCollapsed ? "w-3.5 h-3.5" : "w-4 h-4"} />
                                                     </div>
-                                                    {!isCollapsed && <span className="text-xs font-bold dark:text-zinc-300">Sensor Hub</span>}
+                                                    {!isCollapsed && <span className="text-[10px] font-bold dark:text-zinc-300 truncate">{device.name || "Device"} Sensor</span>}
                                                 </div>
                                             )}
 
@@ -160,7 +167,7 @@ export default function CanvasSidebar({ devices }: CanvasSidebarProps) {
                                                     )}>
                                                         <Zap className={isCollapsed ? "w-3.5 h-3.5" : "w-4 h-4"} />
                                                     </div>
-                                                    {!isCollapsed && <span className="text-xs font-bold dark:text-zinc-300">Actuator Controller</span>}
+                                                    {!isCollapsed && <span className="text-[10px] font-bold dark:text-zinc-300 truncate">{device.name || "Device"} Actuator</span>}
                                                 </div>
                                             )}
                                         </div>

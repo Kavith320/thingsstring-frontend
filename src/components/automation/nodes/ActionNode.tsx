@@ -1,21 +1,28 @@
 "use client";
 
-import { Handle, Position } from "@xyflow/react";
+import { useState } from "react";
+import { Handle, Position, useReactFlow } from "@xyflow/react";
 import { Zap, Cpu, ChevronDown, MousePointer2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export default function ActionNode({ data }: { data: any }) {
+export default function ActionNode({ id, data }: { id: string, data: any }) {
+    const { updateNodeData } = useReactFlow();
     const options = data.options || [];
     const isEnabled = data.setValue === true || data.setValue === 1 || data.setValue === "ON";
 
+    const [currentKey, setCurrentKey] = useState(data.actuatorKey || "");
+    const [currentValue, setCurrentValue] = useState(isEnabled);
+
     const handleKeyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        data.actuatorKey = e.target.value;
+        const val = e.target.value;
+        setCurrentKey(val);
+        updateNodeData(id, { actuatorKey: val });
     };
 
     const toggleValue = () => {
-        data.setValue = !isEnabled;
-        // We need to force a re-render or let ReactFlow handle it. 
-        // In this MVP we just update the data object.
+        const newVal = !currentValue;
+        setCurrentValue(newVal);
+        updateNodeData(id, { setValue: newVal });
     };
 
     return (
@@ -25,8 +32,11 @@ export default function ActionNode({ data }: { data: any }) {
                     <Zap className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-200">Execution Target</div>
-                    <div className="text-sm font-black truncate pr-1">{data.deviceName || "Actuator Device"}</div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-200 flex items-center gap-2">
+                        Execution Target
+                        <span className="bg-emerald-700/50 px-1.5 py-0.5 rounded text-[8px] font-mono border border-emerald-400/30">{data.deviceId}</span>
+                    </div>
+                    <div className="text-xs font-black truncate pr-1">{data.deviceName || "Actuator Device"}</div>
                 </div>
             </div>
 
@@ -36,7 +46,7 @@ export default function ActionNode({ data }: { data: any }) {
                     <div className="relative mt-1.5 overflow-hidden rounded-2xl bg-white/10 backdrop-blur-lg border border-white/20 hover:bg-white/20 transition-all">
                         <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-200 pointer-events-none" />
                         <select
-                            defaultValue={data.actuatorKey}
+                            value={currentKey}
                             onChange={handleKeyChange}
                             className="w-full bg-transparent pl-4 pr-10 py-3 text-xs font-bold outline-none cursor-pointer appearance-none"
                         >
@@ -54,12 +64,12 @@ export default function ActionNode({ data }: { data: any }) {
                         onClick={toggleValue}
                         className={cn(
                             "px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest transition-all shadow-lg active:scale-90",
-                            isEnabled
+                            currentValue
                                 ? "bg-white text-emerald-600"
                                 : "bg-black/20 text-white border border-white/20"
                         )}
                     >
-                        {isEnabled ? "TURN ON" : "TURN OFF"}
+                        {currentValue ? "TURN ON" : "TURN OFF"}
                     </button>
                 </div>
 

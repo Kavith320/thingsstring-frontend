@@ -114,13 +114,13 @@ export default function FlowLogsModal({ flowId, onClose }: FlowLogsModalProps) {
 
                                         <div className="text-right">
                                             <div className="text-xs font-mono dark:text-zinc-400">
-                                                {log.previousValue} → {log.currentValue}
+                                                {log.previousValue ?? 0} → {log.currentValue ?? 0}
                                             </div>
                                             <div className={cn(
                                                 "text-[10px] font-bold",
-                                                log.delta >= 0 ? "text-indigo-500" : "text-amber-500"
+                                                (log.delta ?? 0) >= 0 ? "text-indigo-500" : "text-amber-500"
                                             )}>
-                                                Δ {log.delta.toFixed(2)}
+                                                Δ {(log.delta ?? 0).toFixed(2)}
                                             </div>
                                         </div>
                                     </div>
