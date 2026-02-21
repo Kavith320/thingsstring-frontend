@@ -49,6 +49,10 @@ export default function AutomationPage() {
 
             const { _id, ...body } = flowData;
 
+            console.log(`🚀 [Deployment] ${isUpdate ? 'Updating' : 'Creating'} flow...`);
+            console.log(`🔗 API URL: ${url}`);
+            console.log("📦 Payload:", JSON.stringify(body, null, 2));
+
             await apiRequest(url, {
                 method: isUpdate ? "PUT" : "POST",
                 body: body

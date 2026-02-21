@@ -46,13 +46,17 @@ interface AutomationCanvasEditorProps {
 }
 
 const defaultEdgeOptions = {
-    style: { strokeWidth: 4, stroke: "#6366f1" },
-    type: 'default',
+    style: {
+        strokeWidth: 8,
+        stroke: "#6366f1",
+        filter: "drop-shadow(0px 0px 6px rgba(99, 102, 241, 0.5))"
+    },
+    type: 'smoothstep',
     animated: true,
     markerEnd: {
         type: MarkerType.ArrowClosed,
-        width: 15,
-        height: 15,
+        width: 20,
+        height: 20,
         color: '#6366f1',
     },
 };
@@ -63,10 +67,12 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     const [saving, setSaving] = useState(false);
     const [pendingDeletions, setPendingDeletions] = useState<string[]>([]);
-    const [menu, setMenu] = useState<{ id: string; top?: number; left?: number; right?: number; bottom?: number } | null>(null);
+    const [menu, setMenu] = useState<{ id: string; type: 'node' | 'edge'; top?: number; left?: number; right?: number; bottom?: number } | null>(null);
     const [selectedFlowLogs, setSelectedFlowLogs] = useState<string | null>(null);
+    const [deployProgress, setDeployProgress] = useState(0);
+    const [deployStatus, setDeployStatus] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'loading' } | null>(null);
 
-    const { screenToFlowPosition, fitView } = useReactFlow();
+    const { screenToFlowPosition, fitView, getNodes, getEdges } = useReactFlow();
 
     const onNodeContextMenu = useCallback(
         (event: React.MouseEvent, node: Node) => {
@@ -76,6 +82,23 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
 
             setMenu({
                 id: node.id,
+                type: 'node',
+                top: event.clientY - pane.top,
+                left: event.clientX - pane.left,
+            });
+        },
+        [setMenu]
+    );
+
+    const onEdgeContextMenu = useCallback(
+        (event: React.MouseEvent, edge: Edge) => {
+            event.preventDefault();
+            const pane = reactFlowWrapper.current?.getBoundingClientRect();
+            if (!pane) return;
+
+            setMenu({
+                id: edge.id,
+                type: 'edge',
                 top: event.clientY - pane.top,
                 left: event.clientX - pane.left,
             });
@@ -85,23 +108,30 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
 
     const onPaneClick = useCallback(() => setMenu(null), [setMenu]);
 
-    const deleteNode = useCallback(() => {
+    const deleteItem = useCallback(() => {
         if (!menu) return;
 
-        const nodeToDelete = nodes.find(n => n.id === menu.id);
-        if (nodeToDelete?.data?._id) {
-            const flowId = String(nodeToDelete.data._id);
-            setPendingDeletions(prev => [...prev, flowId]);
+        if (menu.type === 'node') {
+            const allNodes = getNodes();
+            const nodeToDelete = allNodes.find(n => n.id === menu.id);
+            if (nodeToDelete?.data?._id) {
+                const flowId = String(nodeToDelete.data._id);
+                setPendingDeletions(prev => [...prev, flowId]);
+            }
+
+            setNodes((nds) => nds.filter((node) => node.id !== menu.id));
+            setEdges((eds) => eds.filter((edge) => edge.source !== menu.id && edge.target !== menu.id));
+        } else {
+            setEdges((eds) => eds.filter((edge) => edge.id !== menu.id));
         }
 
-        setNodes((nds) => nds.filter((node) => node.id !== menu.id));
-        setEdges((eds) => eds.filter((edge) => edge.source !== menu.id && edge.target !== menu.id));
         setMenu(null);
-    }, [menu, nodes, setNodes, setEdges]);
+    }, [menu, getNodes, setNodes, setEdges]);
 
     const duplicateNode = useCallback(() => {
         if (!menu) return;
-        const node = nodes.find((n) => n.id === menu.id);
+        const allNodes = getNodes();
+        const node = allNodes.find((n) => n.id === menu.id);
         if (node) {
             const newNode = {
                 ...node,
@@ -116,7 +146,7 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
             setNodes((nds) => nds.concat(newNode));
         }
         setMenu(null);
-    }, [menu, nodes, setNodes]);
+    }, [menu, getNodes, setNodes]);
 
     const onConnect = useCallback(
         (params: Connection) => setEdges((eds) => addEdge(params, eds)),
@@ -245,10 +275,12 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
     }, [initialFlows, devices, setNodes, setEdges, fitView]);
 
     // Reset initial load if we get a whole new set of flows from the server (e.g. after deploy)
-    const flowsHash = JSON.stringify(initialFlows?.map(f => f._id));
+    // We hash the entire content of the flows to detect any deep changes
+    const flowsHash = JSON.stringify(initialFlows);
     const lastHash = useRef(flowsHash);
     useEffect(() => {
         if (flowsHash !== lastHash.current) {
+            console.log("[Canvas] Initial flows changed, resetting load flag...");
             initialLoadDone.current = false;
             lastHash.current = flowsHash;
         }
@@ -314,83 +346,146 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
 
     const handleSave = async () => {
         // Find valid chains: Source -> Logic -> Action
-        // This is a simplified version for MVP
-        const sourceNodes = nodes.filter(n => n.type === 'source');
+        // Use getNodes and getEdges to bypass any React state closure issues
+        const currentNodes = getNodes();
+        const currentEdges = getEdges();
+
+        const sourceNodes = currentNodes.filter(n => n.type === 'source');
 
         if (sourceNodes.length === 0) {
-            alert("Add a trigger source node first!");
+            setDeployStatus({ message: "Add a trigger source node first!", type: 'info' });
+            setTimeout(() => setDeployStatus(null), 3000);
             return;
         }
 
         setSaving(true);
+        setDeployProgress(0);
+        setDeployStatus({ message: "Starting deployment...", type: 'loading' });
+
         try {
             // 1. Process Deletions first
             if (onDelete && pendingDeletions.length > 0) {
+                setDeployStatus({ message: "Removing deleted components...", type: 'loading' });
                 // Ensure unique IDs
                 const uniqueDeletions = Array.from(new Set(pendingDeletions));
-                for (const flowId of uniqueDeletions) {
-                    await onDelete(flowId);
+                for (let i = 0; i < uniqueDeletions.length; i++) {
+                    await onDelete(uniqueDeletions[i]);
+                    // Basic progress estimate including deletions
+                    setDeployProgress(((i + 1) / (uniqueDeletions.length + sourceNodes.length)) * 100);
                 }
                 setPendingDeletions([]);
             }
 
-            // 2. Process Upserts (Current nodes on canvas)
-            // Process each source node as a separate flow
-            for (const source of sourceNodes) {
-                const edgeToLogic = edges.find(e => e.source === source.id);
-                if (!edgeToLogic) continue;
+            // 2. Discover all valid paths (Source -> Logic -> Action)
+            // This supports 1-to-N (one source to many logics) and N-to-1 (many logics to one action)
+            const validPaths: { source: Node; logic: Node; action: Node }[] = [];
 
-                const logicNode = nodes.find(n => n.id === edgeToLogic.target && n.type === 'logic');
-                if (!logicNode) continue;
+            sourceNodes.forEach(source => {
+                const edgesFromSource = currentEdges.filter(e => e.source === source.id);
 
-                const edgeToAction = edges.find(e => e.source === logicNode.id);
-                if (!edgeToAction) continue;
+                edgesFromSource.forEach(edgeToLogic => {
+                    const logicNode = currentNodes.find(n => n.id === edgeToLogic.target && n.type === 'logic');
+                    if (!logicNode) return;
 
-                const actionNode = nodes.find(n => n.id === edgeToAction.target && n.type === 'action');
-                if (!actionNode) continue;
+                    const edgesFromLogic = currentEdges.filter(e => e.source === logicNode.id);
+
+                    edgesFromLogic.forEach(edgeToAction => {
+                        const actionNode = currentNodes.find(n => n.id === edgeToAction.target && n.type === 'action');
+                        if (!actionNode) return;
+
+                        validPaths.push({ source, logic: logicNode, action: actionNode });
+                    });
+                });
+            });
+
+            if (validPaths.length === 0) {
+                setDeployStatus({ message: "No complete paths (Source -> Logic -> Action) found.", type: 'info' });
+                setTimeout(() => setDeployStatus(null), 3000);
+                setSaving(false);
+                return;
+            }
+
+            // 3. Process each discovered path as a separate flow
+            let completed = 0;
+            const totalToProcess = validPaths.length;
+
+            for (const path of validPaths) {
+                const { source, logic, action } = path;
 
                 // Format for backend with safety fallbacks to avoid 500 errors
                 const metricPath = source.data.metricPath || (source.data.options as string[])?.[0] || "";
-                const actuatorKey = actionNode.data.actuatorKey || (actionNode.data.options as string[])?.[0] || "";
+                const actuatorKey = action.data.actuatorKey || (action.data.options as string[])?.[0] || "";
 
                 if (!metricPath || !actuatorKey) {
-                    console.warn(`Skipping incomplete flow: ${source.id}`);
+                    console.warn(`Skipping incomplete path: ${source.id} -> ${logic.id} -> ${action.id}`);
+                    completed++;
                     continue;
                 }
 
+                setDeployStatus({ message: `Deploying: ${metricPath} -> ${actuatorKey}`, type: 'loading' });
+
+                // Check for existing _id. If the nodes were loaded from an existing flow, they'll have the same _id.
+                // Priority: Use the _id if it's common between source, logic and action
+                let existingId = source.data?._id === logic.data?._id && logic.data?._id === action.data?._id ? source.data?._id : null;
+
+                // Fallback: If any node has an _id but it's not a common chain, it's likely a new branch from an old node.
+                // In that case, we treat it as a NEW flow if the chain is unique.
+
                 const flowData = {
-                    _id: source.data?._id, // Extract ID if it exists
+                    _id: existingId,
                     name: `${metricPath} -> ${actuatorKey} Auto`,
                     deviceId: source.data.deviceId,
                     metricPath: metricPath,
-                    condition: logicNode.data.condition, // Algebraic Operator Logic
-                    deltaThreshold: Number(logicNode.data.deltaThreshold ?? 1.0),
-                    intervalSec: Number(logicNode.data.intervalSec ?? 30),
-                    cooldownSec: Number(logicNode.data.cooldownSec ?? 60),
+                    condition: logic.data.condition, // Algebraic Operator Logic
+                    deltaThreshold: Number(logic.data.deltaThreshold ?? 1.0),
+                    intervalSec: Number(logic.data.intervalSec ?? 30),
+                    cooldownSec: Number(logic.data.cooldownSec ?? 60),
                     action: {
-                        deviceId: actionNode.data.deviceId,
+                        deviceId: action.data.deviceId,
                         actuatorKey: actuatorKey,
-                        setValue: actionNode.data.setValue ?? true
+                        setValue: action.data.setValue !== undefined ? action.data.setValue : true
                     },
                     enabled: true,
                     // Save Graphic Configurations
                     ui_metadata: {
                         sourcePosition: source.position,
-                        logicPosition: logicNode.position,
-                        actionPosition: actionNode.position,
+                        logicPosition: logic.position,
+                        actionPosition: action.position,
                         // Store small metadata about the architecture
-                        nodes: [source.id, logicNode.id, actionNode.id]
+                        nodes: [source.id, logic.id, action.id]
                     }
                 };
 
-                const { _id: flowId, ...payload } = flowData;
-                console.log(`[Flow ${flowId || 'NEW'}] Deploying:`, payload);
+                console.table({
+                    Path: `${source.id} → ${logic.id} → ${action.id}`,
+                    Sensor: flowData.deviceId,
+                    Actuator: flowData.action.deviceId,
+                    Value: flowData.action.setValue
+                });
+
                 await onSave(flowData);
+
+                completed++;
+                setDeployProgress((completed / totalToProcess) * 100);
             }
-            alert("✓ All flows synchronized with the hardware engine.");
-        } catch (err) {
+
+            // FORCE REFRESH: This ensures that after a save, the canvas re-loads 
+            // everything from the server's single source of truth.
+            initialLoadDone.current = false;
+
+            setDeployStatus({ message: "✓ All paths synchronized successfully.", type: 'success' });
+            setTimeout(() => {
+                setDeployStatus(null);
+                setDeployProgress(0);
+            }, 4000);
+
+        } catch (err: any) {
             console.error("Deploy Error:", err);
-            alert("Failed to save some flows. Check console for details.");
+            setDeployStatus({
+                message: `Deployment failed: ${err?.message || "Check console"}`,
+                type: 'error'
+            });
+            setTimeout(() => setDeployStatus(null), 6000);
         } finally {
             setSaving(false);
         }
@@ -427,6 +522,7 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                     nodeTypes={nodeTypes}
                     defaultEdgeOptions={defaultEdgeOptions}
                     onNodeContextMenu={onNodeContextMenu}
+                    onEdgeContextMenu={onEdgeContextMenu}
                     onPaneClick={onPaneClick}
                     colorMode="system"
                     fitView
@@ -456,7 +552,10 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                                 // Find any node with an ID to open general history
                                 const anySavedNode = nodes.find(n => n.data?._id);
                                 if (anySavedNode) setSelectedFlowLogs(String(anySavedNode.data._id));
-                                else alert("Deploy your flows first to see execution history.");
+                                else {
+                                    setDeployStatus({ message: "Deploy your flows first to see execution history.", type: 'info' });
+                                    setTimeout(() => setDeployStatus(null), 3000);
+                                }
                             }}
                             className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all flex items-center gap-2 font-bold text-xs"
                         >
@@ -477,14 +576,40 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                         </button>
                     </Panel>
 
-                    <Panel position="top-left" className="m-4">
+                    <Panel position="top-left" className="m-4 flex flex-col gap-3">
                         <div className="bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md px-5 py-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-xl">
                             <div className="flex items-center gap-3">
                                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
                                 <span className="text-xs font-bold dark:text-zinc-200 uppercase tracking-widest">Visual Editor v2.0</span>
                             </div>
                         </div>
+
+                        {deployStatus && (
+                            <div className={cn(
+                                "flex items-center gap-3 px-4 py-2.5 rounded-2xl border animate-in slide-in-from-left-4 duration-300 shadow-lg backdrop-blur-md max-w-[320px]",
+                                deployStatus.type === 'loading' && "bg-indigo-50/90 border-indigo-200 text-indigo-700 dark:bg-indigo-500/10 dark:border-indigo-500/20 dark:text-indigo-400",
+                                deployStatus.type === 'success' && "bg-emerald-50/90 border-emerald-200 text-emerald-700 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-400",
+                                deployStatus.type === 'error' && "bg-red-50/90 border-red-200 text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400",
+                                deployStatus.type === 'info' && "bg-blue-50/90 border-blue-200 text-blue-700 dark:bg-blue-500/10 dark:border-blue-500/20 dark:text-blue-400"
+                            )}>
+                                {deployStatus.type === 'loading' && <div className="w-3.5 h-3.5 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />}
+                                {deployStatus.type === 'success' && <div className="w-2 h-2 rounded-full bg-emerald-500" />}
+                                {deployStatus.type === 'error' && <div className="w-2 h-2 rounded-full bg-red-500" />}
+                                {deployStatus.type === 'info' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+                                <span className="text-[11px] font-bold leading-tight">{deployStatus.message}</span>
+                            </div>
+                        )}
                     </Panel>
+
+                    {/* Thin Progress Bar */}
+                    {saving && (
+                        <div className="absolute top-0 left-0 w-full h-1 z-[100] bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                            <div
+                                className="h-full bg-indigo-500 transition-all duration-300 shadow-[0_0_10px_rgba(99,102,241,0.5)]"
+                                style={{ width: `${deployProgress}%` }}
+                            />
+                        </div>
+                    )}
 
                     <Panel position="bottom-left" className="m-4">
                         <div className="flex items-center gap-2 px-4 py-2 bg-indigo-500/5 border border-indigo-500/10 rounded-xl text-[10px] text-indigo-500 font-medium">
@@ -501,45 +626,50 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    duplicateNode();
-                                }}
-                                className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all group"
-                            >
-                                <div className="p-1.5 bg-blue-500/10 text-blue-500 rounded-lg group-hover:bg-blue-500/20 transition-colors">
-                                    <Copy className="w-3.5 h-3.5" />
-                                </div>
-                                Duplicate Node
-                            </button>
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    deleteNode();
+                                    deleteItem();
                                 }}
                                 className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl transition-all group"
                             >
                                 <div className="p-1.5 bg-red-500/10 text-red-500 rounded-lg group-hover:bg-red-500/20 transition-colors">
                                     <Trash2 className="w-3.5 h-3.5" />
                                 </div>
-                                Remove Node
+                                Remove {menu.type === 'node' ? 'Node' : 'Connection'}
                             </button>
 
-                            {Boolean(nodes.find(n => n.id === menu.id)?.data?._id) && (
-                                <div className="mt-1.5 pt-1.5 border-t border-zinc-100 dark:border-zinc-800">
+                            {menu.type === 'node' && (
+                                <>
                                     <button
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            const node = nodes.find(n => n.id === menu.id);
-                                            if (node?.data?._id) setSelectedFlowLogs(String(node.data._id));
-                                            setMenu(null);
+                                            duplicateNode();
                                         }}
-                                        className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-black text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-xl transition-all group"
+                                        className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all group"
                                     >
-                                        <div className="p-1.5 bg-indigo-500/10 text-indigo-500 rounded-lg group-hover:bg-indigo-500 group-hover:text-white transition-colors">
-                                            <History className="w-3.5 h-3.5" />
+                                        <div className="p-1.5 bg-blue-500/10 text-blue-500 rounded-lg group-hover:bg-blue-500/20 transition-colors">
+                                            <Copy className="w-3.5 h-3.5" />
                                         </div>
-                                        Execution Logs
+                                        Duplicate Node
                                     </button>
-                                </div>
+
+                                    {nodes.find(n => n.id === menu?.id)?.data?._id && (
+                                        <div className="mt-1.5 pt-1.5 border-t border-zinc-100 dark:border-zinc-800">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const node = nodes.find(n => n.id === menu.id);
+                                                    if (node?.data?._id) setSelectedFlowLogs(String(node.data._id));
+                                                    setMenu(null);
+                                                }}
+                                                className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-black text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-xl transition-all group"
+                                            >
+                                                <div className="p-1.5 bg-indigo-500/10 text-indigo-500 rounded-lg group-hover:bg-indigo-500 group-hover:text-white transition-colors">
+                                                    <History className="w-3.5 h-3.5" />
+                                                </div>
+                                                Execution Logs
+                                            </button>
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     )}
