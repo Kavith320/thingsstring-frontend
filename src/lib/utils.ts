@@ -42,6 +42,17 @@ export function isOnlineFromLastTelemetry(
 
 export function formatLastSeen(ms: number | null | undefined): string {
     if (!ms) return "No telemetry yet";
-    const d = new Date(ms);
-    return d.toLocaleString();
+    const secAgo = Math.floor((Date.now() - ms) / 1000);
+
+    if (secAgo < 1) return "Just now";
+    if (secAgo < 60) return `${secAgo}s ago`;
+
+    const minAgo = Math.floor(secAgo / 60);
+    if (minAgo < 60) return `${minAgo}m ago`;
+
+    const hoursAgo = Math.floor(minAgo / 60);
+    if (hoursAgo < 24) return `${hoursAgo}h ago`;
+
+    const daysAgo = Math.floor(hoursAgo / 24);
+    return `${daysAgo}d ago`;
 }

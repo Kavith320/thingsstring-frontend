@@ -133,7 +133,7 @@ export default function DashboardPage() {
         setError("");
         try {
             const data: any = await apiRequest("/api/devices", { method: "GET" });
-            const list = Array.isArray(data) ? data : data?.devices || [];
+            const list: Device[] = Array.isArray(data) ? data : (data?.devices || []);
             setDevices(list);
         } catch (e: any) {
             setError(e.message || "Failed to load devices");
@@ -164,7 +164,7 @@ export default function DashboardPage() {
 
             Object.entries(last).forEach(([k, v]) => {
                 // Skip non-data fields
-                if (['ts', 'timestamp', 'created_at', 'updatedAt', '_id', '__v', 'actuators'].includes(k)) return;
+                if (['ts', 'timestamp', 'created_at', 'updatedAt', '_id', '__v', 'actuators', 'UP', 'up', 'id', 'uid', 'uuid', 'deviceId', 'device_id', 'chipId', 'chip_id', 'time', 'date', 'meta', 'raw'].includes(k)) return;
 
                 // If it's a number, it's likely a sensor
                 if (typeof v === 'number') {
@@ -187,19 +187,39 @@ export default function DashboardPage() {
             const allActKeys = new Set([...Object.keys(configActs), ...Object.keys(telemActs)]);
 
             allActKeys.forEach(key => {
-                // Try to find state in telemetry first, then config, then default
-                let val = telemActs[key];
-                if (val === undefined) {
-                    // Try to find in config
-                    const c = configActs[key];
-                    val = (typeof c === 'object') ? (c.value || c.state) : c;
+                // Technique from Device Page: Try telemetry, then top-level, then default
+                const tVal = telemActs[key];
+                const cVal = configActs[key];
+
+                // Extraction logic
+                let rawVal = tVal;
+                if (rawVal === undefined || rawVal === null) {
+                    rawVal = (typeof cVal === 'object') ? (cVal.value || cVal.state) : cVal;
                 }
 
-                // Normalize state
-                let state = "OFF";
-                if (val === 1 || val === true || val === "ON" || val === "high") state = "ON";
+                // Fallback to default if still empty
+                if ((rawVal === undefined || rawVal === null) && typeof cVal === 'object' && cVal.default) {
+                    rawVal = cVal.default.state || cVal.default.value;
+                }
 
-                actuators.push({ key, state });
+                // Robust Normalization (Case Insensitive)
+                function normalize(v: any): "ON" | "OFF" {
+                    if (v === undefined || v === null) return "OFF";
+                    if (typeof v === 'object') return normalize(v.state || v.value);
+                    const s = String(v).toUpperCase();
+                    return (s === "ON" || s === "1" || s === "TRUE" || s === "HIGH") ? "ON" : "OFF";
+                }
+
+                const state = normalize(rawVal);
+
+                // Get Auto Mode (using technique from device page)
+                let auto = false;
+                if (typeof cVal === 'object') {
+                    if (typeof cVal.default?.auto === 'boolean') auto = cVal.default.auto;
+                    else if (typeof cVal.auto === 'boolean') auto = cVal.auto;
+                }
+
+                actuators.push({ key, state, auto });
             });
 
             return { id, name, model, online, lastSeenMs, sensors, actuators };
@@ -333,30 +353,37 @@ export default function DashboardPage() {
                             )}
                         </div>
 
-                        {/* Actuators Row (if any) */}
+                        {/* Actuators Status Section */}
                         {dev.actuators.length > 0 && (
                             <div className="mb-6 pt-4 border-t border-zinc-100 dark:border-zinc-800/50">
-                                <p className="text-[10px] uppercase tracking-widest text-zinc-400 mb-3 font-semibold">Actuators</p>
+                                <p className="text-[10px] uppercase tracking-widest text-zinc-400 mb-3 font-semibold">Actuators Status</p>
                                 <div className="flex flex-wrap gap-2">
-                                    {dev.actuators.map((act, idx) => {
+                                    {dev.actuators.map((act: any, idx: number) => {
                                         const isOn = act.state === "ON";
                                         return (
                                             <div key={idx} className={cn(
-                                                "flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl border text-xs font-medium transition-colors cursor-default select-none",
+                                                "flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl border text-xs font-medium transition-all duration-300",
                                                 isOn
-                                                    ? "bg-indigo-500/10 border-indigo-500/20 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300"
+                                                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
                                                     : "bg-zinc-50 border-zinc-200 text-zinc-500 dark:bg-zinc-900 dark:border-zinc-800"
                                             )}>
-                                                {isOn ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
+                                                <div className={cn(
+                                                    "w-2 h-2 rounded-full",
+                                                    isOn ? "bg-emerald-500 animate-pulse" : "bg-zinc-300 dark:bg-zinc-700"
+                                                )} />
                                                 <span>{act.key}</span>
+                                                <span className={cn(
+                                                    "ml-1 font-bold uppercase",
+                                                    isOn ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400"
+                                                )}>
+                                                    {act.state}
+                                                </span>
                                             </div>
                                         );
                                     })}
                                 </div>
                             </div>
-                        )}
-
-                        {/* Footer */}
+                        )}                    {/* Footer */}
                         <div className="mt-auto pt-4 border-t border-zinc-100 dark:border-zinc-800/50 flex justify-between items-center text-xs text-zinc-400">
                             <span>Last seen {formatLastSeen(dev.lastSeenMs)}</span>
                             <span className="group-hover:translate-x-1 transition-transform text-zinc-300 dark:text-zinc-600">Details →</span>

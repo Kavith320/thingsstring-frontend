@@ -296,7 +296,6 @@ export default function AiPage() {
                     </div>
                     <div>
                         <div className="text-sm font-semibold text-zinc-900 dark:text-white">Assistant</div>
-                        <div className="text-[10px] text-zinc-500">Powered by Gemini AI (Hybrid Mode)</div>
                     </div>
                 </div>
 

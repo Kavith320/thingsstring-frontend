@@ -11,6 +11,8 @@ import {
     type ScheduleType,
 } from "@/lib/schedule-utils";
 import { cn } from "@/lib/utils";
+import Switch from "@/components/common/Switch";
+import { Calendar } from "lucide-react";
 
 /* ---------------- Types ---------------- */
 interface Action {
@@ -386,14 +388,14 @@ export default function DeviceSchedulesPage() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="mb-1 block text-xs font-medium text-zinc-500">Enabled</label>
-                                    <Select
-                                        value={String(formSchedule.enabled)}
-                                        onChange={e => setFormSchedule({ ...formSchedule, enabled: e.target.value === 'true' })}
-                                    >
-                                        <option value="true">Yes</option>
-                                        <option value="false">No</option>
-                                    </Select>
+                                    <label className="mb-1 block text-xs font-medium text-zinc-500">Enable Schedule</label>
+                                    <div className="pt-2">
+                                        <Switch
+                                            checked={formSchedule.enabled}
+                                            icon={Calendar}
+                                            onChange={(checked) => setFormSchedule({ ...formSchedule, enabled: checked })}
+                                        />
+                                    </div>
                                 </div>
                             </div>
 

@@ -7,6 +7,8 @@ import { apiRequest } from "../../../../lib/api";
 import TelemetryGraph from "@/components/devices/TelemetryGraph";
 import SensorsGrid from "@/components/devices/SensorsGrid";
 import LoadingSignal from "@/components/LoadingSignal";
+import Switch from "@/components/common/Switch";
+import { Sparkles, Power } from "lucide-react";
 
 /* ---------------- helpers: time + online ---------------- */
 
@@ -164,13 +166,31 @@ export default function DeviceDetailsPage() {
     setErr("");
     try {
       const d = await fetchDevice();
-      setDevice(d);
+      setDevice(prev => {
+        if (!prev || !busyAct) return d;
+
+        // Preserve busy actuator state
+        const last = d.last_telemetry || {};
+        const acts = last.actuators || {};
+        const prevActs = prev.last_telemetry?.actuators || {};
+
+        if (prevActs[busyAct] !== undefined) {
+          return {
+            ...d,
+            last_telemetry: {
+              ...last,
+              actuators: { ...acts, [busyAct]: prevActs[busyAct] }
+            }
+          };
+        }
+        return d;
+      });
     } catch (e) {
       setErr(e.message || "Failed to load device");
     } finally {
       setLoading(false);
     }
-  }, [fetchDevice]);
+  }, [fetchDevice, busyAct]);
 
   const loadHistoryOnce = useCallback(async () => {
     try {
@@ -280,7 +300,10 @@ export default function DeviceDetailsPage() {
     } catch (e) {
       setMsg(`❌ Command failed: ${e.message}`);
     } finally {
-      setBusyAct("");
+      // Hold busy state for 5 seconds to allow hardware to sync
+      setTimeout(() => {
+        setBusyAct("");
+      }, 5000);
     }
   }
 
@@ -386,12 +409,6 @@ export default function DeviceDetailsPage() {
         </div>
       </div>
 
-      {/* ✅ Sensors tiles */}
-      <Card title="Sensors (Latest)">
-        <SensorsGrid lastTelemetry={device?.last_telemetry} />
-
-      </Card>
-
       {/* ✅ Actuators (hide / show nice empty state) */}
       <Card
         title="Actuators (Mode + Manual Control)"
@@ -411,62 +428,74 @@ export default function DeviceDetailsPage() {
               const type = act?.type || meta.cfgActuators?.[actKey]?.type || "-";
               const auto = getActAuto(act);
               const liveState = getActLiveState(actKey, meta.telemetryActuators, act);
-              const desired = getActDesiredState(act);
               const rowBusy = busyAct === actKey;
 
               return (
                 <div
                   key={actKey}
-                  className="rounded-2xl border p-4 border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950/40"
+                  className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950/35"
                 >
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0">
-                      <div className="font-semibold break-all">{actKey}</div>
-                      <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                        Type: {type}
-                      </div>
-                      <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                        Live: <span className="font-medium">{liveState}</span> • Desired:{" "}
-                        <span className="font-medium">{desired}</span>
-                      </div>
-                      <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                        Mode:{" "}
-                        <span className="font-medium">{auto ? "AUTO" : "MANUAL"}</span>
-                      </div>
-                      {auto && (
-                        <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                          Auto mode enabled — switch to MANUAL to control.
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StateBadge state={liveState} />
-
-                      <Btn disabled={rowBusy} onClick={() => toggleActuatorAuto(actKey)}>
-                        {auto ? "AUTO" : "MANUAL"}
-                      </Btn>
-
-                      <Btn disabled={rowBusy || auto} onClick={() => setActuatorState(actKey, "ON")}>
-                        ON
-                      </Btn>
-
-                      <Btn disabled={rowBusy || auto} onClick={() => setActuatorState(actKey, "OFF")}>
-                        OFF
-                      </Btn>
-                    </div>
-                  </div>
-
+                  {/* Absolute Loading Overlay - Prevents layout jumping */}
                   {rowBusy && (
-                    <div className="mt-4 flex items-center justify-center animate-in fade-in duration-300">
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60 backdrop-blur-[1px] dark:bg-zinc-950/60 animate-in fade-in duration-300">
                       <LoadingSignal size="sm" />
                     </div>
                   )}
+
+                  <div className="p-4 sm:p-5">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      {/* Left: Info */}
+                      <div className="flex items-center justify-between lg:justify-start gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="font-bold text-zinc-900 dark:text-white text-base tracking-tight">{actKey}</div>
+                          <Badge>{type}</Badge>
+                        </div>
+                        {/* Mobile/Tablet State Badge (right-aligned) */}
+                        <div className="lg:hidden">
+                          <StateBadge state={liveState} />
+                        </div>
+                      </div>
+
+                      {/* Right: Controls */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 sm:gap-8">
+                        <div className="flex items-center justify-between sm:justify-start gap-4 h-10 px-3 sm:px-0 rounded-xl bg-zinc-50 sm:bg-transparent dark:bg-zinc-900/50 sm:dark:bg-transparent">
+                          <Switch
+                            label="Auto Mode"
+                            checked={auto}
+                            disabled={rowBusy}
+                            variant="emerald"
+                            icon={Sparkles}
+                            onChange={() => toggleActuatorAuto(actKey)}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between sm:justify-start gap-4 h-10 px-3 sm:px-0 rounded-xl bg-zinc-50 sm:bg-transparent dark:bg-zinc-900/50 sm:dark:bg-transparent">
+                          <Switch
+                            label="Manual Control"
+                            checked={liveState === "ON"}
+                            disabled={rowBusy || auto}
+                            icon={Power}
+                            onChange={(checked) => setActuatorState(actKey, checked ? "ON" : "OFF")}
+                          />
+                        </div>
+
+                        {/* Desktop State Badge */}
+                        <div className="hidden lg:block min-w-[70px] text-right ml-4">
+                          <StateBadge state={liveState} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               );
             })}
           </div>
         )}
+      </Card>
+
+      {/* ✅ Sensors tiles */}
+      <Card title="Sensors (Latest)">
+        <SensorsGrid lastTelemetry={device?.last_telemetry} />
       </Card>
 
       {/* Graphs */}
