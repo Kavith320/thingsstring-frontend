@@ -18,6 +18,13 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ThingsString",
   description: "IoT Management Platform",
+  icons: {
+    icon: [
+      { url: "/web-app-manifest-192x192.png", sizes: "192x192", type: "image/png" },
+      { url: "/web-app-manifest-512x512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: "/web-app-manifest-512x512.png",
+  },
 };
 
 export default function RootLayout({
