@@ -13,6 +13,7 @@ import GoogleButton from "@/components/auth/GoogleButton";
 const SimpleDotsBackground = dynamic(() => import("@/components/common/SimpleDotsBackground"), {
   ssr: false,
 });
+import Logo from "@/components/common/Logo";
 
 export default function LoginClient() {
   const router = useRouter();
@@ -68,8 +69,8 @@ export default function LoginClient() {
         <div className="w-full max-w-sm sm:max-w-md">
           {/* Header */}
           <div className="mb-6 sm:mb-7 text-center">
-            <div className="mx-auto grid h-12 w-12 sm:h-14 sm:w-14 place-items-center rounded-2xl bg-white text-black font-bold shadow-lg shadow-white/10">
-              TS
+            <div className="mx-auto grid h-12 w-12 sm:h-14 sm:w-14 place-items-center rounded-2xl bg-[#17181a] border border-white/10 p-2 sm:p-2.5 shadow-lg shadow-white/5">
+              <Logo strokeWidth={24} nodeRadius={26} />
             </div>
             <h1 className="mt-3 text-xl sm:text-2xl font-semibold text-white">
               ThingsString

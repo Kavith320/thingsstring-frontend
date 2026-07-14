@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { getUser, logout } from "@/lib/auth";
 import { useEffect, useState } from "react";
+import Logo from "@/components/common/Logo";
 
 const nav = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -40,8 +41,8 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
             {/* Header */}
             <div className="p-5 sm:p-6 italic">
                 <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-2xl bg-black text-white dark:bg-white dark:text-black flex items-center justify-center font-bold">
-                        TS
+                    <div className="h-10 w-10 rounded-2xl bg-black dark:bg-zinc-900 flex items-center justify-center p-2 border border-zinc-200 dark:border-zinc-800 shadow-sm shadow-indigo-500/5">
+                        <Logo strokeWidth={26} nodeRadius={28} />
                     </div>
                     <div className="min-w-0">
                         <div className="font-bold leading-tight truncate text-zinc-900 dark:text-zinc-100">ThingsString</div>

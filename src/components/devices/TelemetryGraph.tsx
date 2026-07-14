@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
     AreaChart,
     Area,
@@ -96,6 +96,11 @@ function CustomTooltip({ active, payload, label }: any) {
 /* ---------------- main component ---------------- */
 export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
     const [open, setOpen] = useState(false);
+    const [mounted, setMounted] = useState(false);
+
+    useEffect(() => {
+        setMounted(true);
+    }, []);
 
     // Zoom state
     const [xDomain, setXDomain] = useState<[number, number] | null>(null);
@@ -296,108 +301,114 @@ export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
                 {/* chart */}
                 <div className="rounded-3xl border p-1 sm:p-4 border-zinc-100 bg-zinc-50/50 dark:border-zinc-800/50 dark:bg-zinc-900/20 backdrop-blur-sm">
                     <div className={`w-full ${heightCls}`}>
-                        <ResponsiveContainer>
-                            <AreaChart
-                                data={chartData}
-                                onMouseDown={(e: any) => {
-                                    if (!fullscreen) return;
-                                    if (!e || e.activeLabel == null) return;
-                                    setRefLeft(e.activeLabel);
-                                    setRefRight(null);
-                                }}
-                                onMouseMove={(e: any) => {
-                                    if (!fullscreen) return;
-                                    if (refLeft == null) return;
-                                    if (!e || e.activeLabel == null) return;
-                                    setRefRight(e.activeLabel);
-                                }}
-                                onMouseUp={() => {
-                                    if (!fullscreen) return;
-                                    if (refLeft == null || refRight == null) {
+                        {mounted ? (
+                            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                                <AreaChart
+                                    data={chartData}
+                                    onMouseDown={(e: any) => {
+                                        if (!fullscreen) return;
+                                        if (!e || e.activeLabel == null) return;
+                                        setRefLeft(e.activeLabel);
+                                        setRefRight(null);
+                                    }}
+                                    onMouseMove={(e: any) => {
+                                        if (!fullscreen) return;
+                                        if (refLeft == null) return;
+                                        if (!e || e.activeLabel == null) return;
+                                        setRefRight(e.activeLabel);
+                                    }}
+                                    onMouseUp={() => {
+                                        if (!fullscreen) return;
+                                        if (refLeft == null || refRight == null) {
+                                            setRefLeft(null);
+                                            setRefRight(null);
+                                            return;
+                                        }
+                                        const next = clampDomain([refLeft as number, refRight as number]);
+                                        if (next) setXDomain(next);
                                         setRefLeft(null);
                                         setRefRight(null);
-                                        return;
-                                    }
-                                    const next = clampDomain([refLeft as number, refRight as number]);
-                                    if (next) setXDomain(next);
-                                    setRefLeft(null);
-                                    setRefRight(null);
-                                }}
-                            >
-                                <defs>
-                                    {(fullscreen ? safeSelectedKeys : showKeys).map((k) => (
-                                        <linearGradient key={k} id={`color-${k}`} x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor={colorForKey(k, numericKeys)} stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor={colorForKey(k, numericKeys)} stopOpacity={0} />
-                                        </linearGradient>
-                                    ))}
-                                </defs>
-
-                                <CartesianGrid strokeDasharray="3 3" stroke="#52525b" strokeOpacity={0.1} vertical={false} />
-
-                                <XAxis
-                                    dataKey="__ms"
-                                    type="number"
-                                    domain={xDomain || ["dataMin", "dataMax"]}
-                                    tickFormatter={(ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    stroke="#a1a1aa"
-                                    fontSize={11}
-                                    tickLine={false}
-                                    axisLine={false}
-                                    minTickGap={30}
-                                />
-
-                                <YAxis
-                                    domain={yDomain as any}
-                                    stroke="#a1a1aa"
-                                    fontSize={11}
-                                    tickLine={false}
-                                    axisLine={false}
-                                    tickCount={5}
-                                />
-
-                                <Tooltip
-                                    content={<CustomTooltip />}
-                                    cursor={{ stroke: "#a1a1aa", strokeWidth: 1, strokeDasharray: "4 4" }}
-                                />
-
-                                {refLeft != null && refRight != null ? (
-                                    <ReferenceArea x1={refLeft} x2={refRight} strokeOpacity={0.1} fillOpacity={0.1} />
-                                ) : null}
-
-                                {(fullscreen ? safeSelectedKeys : showKeys).map((k) => (
-                                    <Area
-                                        key={k}
-                                        type="monotone"
-                                        dataKey={k}
-                                        stroke={colorForKey(k, numericKeys)}
-                                        fill={`url(#color-${k})`}
-                                        strokeWidth={2}
-                                        isAnimationActive={fullscreen} // smoother only in fullscreen
-                                        animationDuration={500}
-                                        activeDot={{ r: 6, strokeWidth: 0, fill: colorForKey(k, numericKeys) }}
-                                    />
-                                ))}
-
-                                <Brush
-                                    dataKey="__ms"
-                                    height={20}
-                                    travellerWidth={10}
-                                    tickFormatter={() => ""}
-                                    stroke="#52525b"
-                                    fill="transparent"
-                                    onChange={(range: any) => {
-                                        if (!range) return;
-                                        const start = chartData?.[range.startIndex]?.__ms;
-                                        const end = chartData?.[range.endIndex]?.__ms;
-                                        if (start && end) {
-                                            const next = clampDomain([start, end]);
-                                            setXDomain(next);
-                                        }
                                     }}
-                                />
-                            </AreaChart>
-                        </ResponsiveContainer>
+                                >
+                                    <defs>
+                                        {(fullscreen ? safeSelectedKeys : showKeys).map((k) => (
+                                            <linearGradient key={k} id={`color-${k}`} x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="5%" stopColor={colorForKey(k, numericKeys)} stopOpacity={0.3} />
+                                                <stop offset="95%" stopColor={colorForKey(k, numericKeys)} stopOpacity={0} />
+                                            </linearGradient>
+                                        ))}
+                                    </defs>
+
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#52525b" strokeOpacity={0.1} vertical={false} />
+
+                                    <XAxis
+                                        dataKey="__ms"
+                                        type="number"
+                                        domain={xDomain || ["dataMin", "dataMax"]}
+                                        tickFormatter={(ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        stroke="#a1a1aa"
+                                        fontSize={11}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        minTickGap={30}
+                                    />
+
+                                    <YAxis
+                                        domain={yDomain as any}
+                                        stroke="#a1a1aa"
+                                        fontSize={11}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        tickCount={5}
+                                    />
+
+                                    <Tooltip
+                                        content={<CustomTooltip />}
+                                        cursor={{ stroke: "#a1a1aa", strokeWidth: 1, strokeDasharray: "4 4" }}
+                                    />
+
+                                    {refLeft != null && refRight != null ? (
+                                        <ReferenceArea x1={refLeft} x2={refRight} strokeOpacity={0.1} fillOpacity={0.1} />
+                                    ) : null}
+
+                                    {(fullscreen ? safeSelectedKeys : showKeys).map((k) => (
+                                        <Area
+                                            key={k}
+                                            type="monotone"
+                                            dataKey={k}
+                                            stroke={colorForKey(k, numericKeys)}
+                                            fill={`url(#color-${k})`}
+                                            strokeWidth={2}
+                                            isAnimationActive={fullscreen} // smoother only in fullscreen
+                                            animationDuration={500}
+                                            activeDot={{ r: 6, strokeWidth: 0, fill: colorForKey(k, numericKeys) }}
+                                        />
+                                    ))}
+
+                                    <Brush
+                                        dataKey="__ms"
+                                        height={20}
+                                        travellerWidth={10}
+                                        tickFormatter={() => ""}
+                                        stroke="#52525b"
+                                        fill="transparent"
+                                        onChange={(range: any) => {
+                                            if (!range) return;
+                                            const start = chartData?.[range.startIndex]?.__ms;
+                                            const end = chartData?.[range.endIndex]?.__ms;
+                                            if (start && end) {
+                                                const next = clampDomain([start, end]);
+                                                setXDomain(next);
+                                            }
+                                        }}
+                                    />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="w-full h-full flex items-center justify-center text-xs text-zinc-400">
+                                Loading chart...
+                            </div>
+                        )}
                     </div>
 
                     <div className="mt-3 flex items-center justify-between text-[10px] text-zinc-400 px-2">

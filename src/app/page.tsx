@@ -8,21 +8,38 @@ import LoadingSignal from "@/components/LoadingSignal";
 import dynamic from "next/dynamic";
 
 const SimpleDotsBackground = dynamic(() => import("@/components/common/SimpleDotsBackground"), { ssr: false });
+const LogoSplash = dynamic(() => import("@/components/common/LogoSplash"), { ssr: false });
+import Logo from "@/components/common/Logo";
 
 export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [showSplash, setShowSplash] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     const token = getToken();
     setIsLoggedIn(!!token);
+
+    const hasSeen = sessionStorage.getItem("hasSeenSplash");
+    if (!hasSeen) {
+      setShowSplash(true);
+    }
   }, []);
 
   if (!mounted) return null;
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center relative overflow-hidden px-6">
+    <>
+      {showSplash && (
+        <LogoSplash
+          onComplete={() => {
+            sessionStorage.setItem("hasSeenSplash", "true");
+            setShowSplash(false);
+          }}
+        />
+      )}
+      <div className="min-h-screen flex flex-col items-center justify-center relative overflow-hidden px-6">
       {/* Background Decorative Elements */}
       {/* NEW: Simple Dots Background */}
       <div className="absolute inset-0 z-0">
@@ -33,8 +50,8 @@ export default function Home() {
       <main className="z-10 text-center max-w-4xl mx-auto flex flex-col items-center">
         <div className="ts-fade-up">
           <div className="flex items-center justify-center gap-4 mb-8">
-            <div className="h-16 w-16 rounded-3xl bg-black text-white dark:bg-white dark:text-black flex items-center justify-center font-bold text-2xl shadow-2xl shadow-indigo-500/20">
-              TS
+            <div className="h-16 w-16 rounded-3xl bg-black dark:bg-zinc-900 flex items-center justify-center p-3 shadow-2xl shadow-indigo-500/20 border border-zinc-200 dark:border-zinc-800">
+              <Logo strokeWidth={24} nodeRadius={26} />
             </div>
           </div>
 
@@ -101,5 +118,6 @@ export default function Home() {
         </div>
       </footer>
     </div>
+    </>
   );
 }
