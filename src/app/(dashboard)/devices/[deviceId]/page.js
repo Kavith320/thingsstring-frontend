@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { apiRequest } from "../../../../lib/api";
+import { formatLastSeen } from "@/lib/utils";
 
 import TelemetryGraph from "@/components/devices/TelemetryGraph";
 import SensorsGrid from "@/components/devices/SensorsGrid";
@@ -346,8 +347,8 @@ export default function DeviceDetailsPage() {
 
   if (!device) return null;
 
-  const secsAgo = meta.lastSeenMs
-    ? Math.round((Date.now() - meta.lastSeenMs) / 1000)
+  const lastSeenFormatted = meta.lastSeenMs
+    ? formatLastSeen(meta.lastSeenMs)
     : null;
 
   const actuatorCount = Object.keys(meta.controlActuators || {}).length;
@@ -374,7 +375,7 @@ export default function DeviceDetailsPage() {
               <Badge tone={meta.online ? "green" : "red"}>
                 {meta.online ? "ONLINE" : "OFFLINE"}
               </Badge>
-              {secsAgo !== null && <Badge>{`Updated: ${secsAgo}s ago`}</Badge>}
+              {lastSeenFormatted && <Badge>{`Updated: ${lastSeenFormatted}`}</Badge>}
             </div>
 
             <div className="pt-2 text-[10px] text-zinc-400 uppercase tracking-widest font-medium">
