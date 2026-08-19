@@ -596,13 +596,17 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                                             return <span className="text-zinc-400">Drag Sensor ➔ Logic ➔ Action nodes onto canvas to create rules</span>;
                                         }
 
-                                        const sensorName = sourceNode?.data?.name || "Sensor";
-                                        const sensorMetric = sourceNode?.data?.metricPath || "Metric";
-                                        const operator = logicNode?.data?.condition?.operator || ">";
-                                        const threshold = logicNode?.data?.condition?.value ?? logicNode?.data?.deltaThreshold ?? 0;
-                                        const actuatorName = actionNode?.data?.deviceName || "Actuator";
-                                        const actuatorKey = actionNode?.data?.actuatorKey || "Output Pin";
-                                        const actuatorState = actionNode?.data?.setValue ? "ON" : "OFF";
+                                        const sourceData = (sourceNode?.data || {}) as any;
+                                        const logicData = (logicNode?.data || {}) as any;
+                                        const actionData = (actionNode?.data || {}) as any;
+
+                                        const sensorName = String(sourceData.name || "Sensor");
+                                        const sensorMetric = String(sourceData.metricPath || "Metric");
+                                        const operator = String(logicData.condition?.operator || ">");
+                                        const threshold = String(logicData.condition?.value ?? logicData.deltaThreshold ?? 0);
+                                        const actuatorName = String(actionData.deviceName || "Actuator");
+                                        const actuatorKey = String(actionData.actuatorKey || "Output Pin");
+                                        const actuatorState = actionData.setValue ? "ON" : "OFF";
 
                                         return (
                                             <span className="flex items-center gap-1.5 flex-wrap">
