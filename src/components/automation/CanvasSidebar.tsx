@@ -50,28 +50,30 @@ export default function CanvasSidebar({ devices }: CanvasSidebarProps) {
                     {/* Logic Blocks */}
                     <section>
                         <div className={cn("flex items-center justify-between mb-3", isCollapsed ? "justify-center" : "")}>
-                            <h4 className={cn("text-[10px] font-black text-zinc-400 uppercase tracking-widest transition-all", isCollapsed ? "scale-0 h-0 w-0 overflow-hidden" : "")}>Logic</h4>
-                            <Filter className="w-3.5 h-3.5 text-zinc-300" />
+                            <h4 className={cn("text-[10px] font-black text-amber-500 uppercase tracking-widest transition-all flex items-center gap-1", isCollapsed ? "scale-0 h-0 w-0 overflow-hidden" : "")}>
+                                🟡 Step 2 • Logic Filter
+                            </h4>
+                            <Filter className="w-3.5 h-3.5 text-amber-400" />
                         </div>
                         <div
                             className={cn(
-                                "group flex items-center justify-center rounded-2xl bg-zinc-50 dark:bg-white/5 border border-zinc-200 dark:border-zinc-800 cursor-grab hover:border-amber-500/50 hover:shadow-xl hover:shadow-amber-500/10 transition-all",
-                                isCollapsed ? "p-3" : "p-4 gap-4"
+                                "group flex items-center justify-center rounded-2xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 cursor-grab hover:border-amber-500 hover:shadow-xl hover:shadow-amber-500/20 transition-all",
+                                isCollapsed ? "p-3" : "p-3.5 gap-3"
                             )}
                             draggable
-                            onDragStart={(e) => onDragStart(e, "logic", { deltaThreshold: 1.0, intervalSec: 30, cooldownSec: 60 })}
-                            title={isCollapsed ? "Delta Filter" : ""}
+                            onDragStart={(e) => onDragStart(e, "logic", { condition: { operator: ">", value: 30 }, deltaThreshold: 1.0, intervalSec: 30, cooldownSec: 60 })}
+                            title={isCollapsed ? "Threshold Filter" : ""}
                         >
                             <div className={cn(
-                                "rounded-xl bg-amber-500/10 text-amber-500 group-hover:bg-amber-500 group-hover:text-white transition-all",
-                                isCollapsed ? "p-1.5" : "p-3"
+                                "rounded-xl bg-amber-500 text-white shadow-md group-hover:scale-110 transition-transform",
+                                isCollapsed ? "p-1.5" : "p-2.5"
                             )}>
-                                <Filter className={isCollapsed ? "w-4 h-4" : "w-5 h-5"} />
+                                <Filter className={isCollapsed ? "w-4 h-4" : "w-4 h-4"} />
                             </div>
                             {!isCollapsed && (
-                                <div>
-                                    <div className="text-sm font-bold dark:text-white">Delta Filter</div>
-                                    <div className="text-[10px] text-zinc-500 font-medium whitespace-nowrap">Value change logic</div>
+                                <div className="min-w-0">
+                                    <div className="text-xs font-black dark:text-white">Threshold Comparator</div>
+                                    <div className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold truncate">IF telemetry &gt; X</div>
                                 </div>
                             )}
                         </div>
@@ -140,7 +142,12 @@ export default function CanvasSidebar({ devices }: CanvasSidebarProps) {
                                                     )}>
                                                         <Activity className={isCollapsed ? "w-3.5 h-3.5" : "w-4 h-4"} />
                                                     </div>
-                                                    {!isCollapsed && <span className="text-[10px] font-bold dark:text-zinc-300 truncate">{device.name || "Device"} Sensor</span>}
+                                                    {!isCollapsed && (
+                                                        <div className="flex flex-col min-w-0 text-left">
+                                                            <span className="text-[10px] font-bold dark:text-zinc-300 truncate">{device.name || "Device"} Sensor</span>
+                                                            <span className="text-[8px] font-extrabold text-indigo-500 uppercase tracking-widest">🔵 Step 1 • Input</span>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
 
@@ -167,7 +174,12 @@ export default function CanvasSidebar({ devices }: CanvasSidebarProps) {
                                                     )}>
                                                         <Zap className={isCollapsed ? "w-3.5 h-3.5" : "w-4 h-4"} />
                                                     </div>
-                                                    {!isCollapsed && <span className="text-[10px] font-bold dark:text-zinc-300 truncate">{device.name || "Device"} Actuator</span>}
+                                                    {!isCollapsed && (
+                                                        <div className="flex flex-col min-w-0 text-left">
+                                                            <span className="text-[10px] font-bold dark:text-zinc-300 truncate">{device.name || "Device"} Actuator</span>
+                                                            <span className="text-[8px] font-extrabold text-emerald-500 uppercase tracking-widest">🟢 Step 3 • Output</span>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
                                         </div>

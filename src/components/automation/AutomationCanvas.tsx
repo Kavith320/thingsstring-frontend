@@ -47,16 +47,16 @@ interface AutomationCanvasEditorProps {
 
 const defaultEdgeOptions = {
     style: {
-        strokeWidth: 8,
+        strokeWidth: 4,
         stroke: "#6366f1",
-        filter: "drop-shadow(0px 0px 6px rgba(99, 102, 241, 0.5))"
+        filter: "drop-shadow(0px 2px 8px rgba(99, 102, 241, 0.5))"
     },
-    type: 'smoothstep',
+    type: 'default',
     animated: true,
     markerEnd: {
         type: MarkerType.ArrowClosed,
-        width: 20,
-        height: 20,
+        width: 18,
+        height: 18,
         color: '#6366f1',
     },
 };
@@ -577,10 +577,45 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                     </Panel>
 
                     <Panel position="top-left" className="m-4 flex flex-col gap-3">
-                        <div className="bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md px-5 py-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-xl">
-                            <div className="flex items-center gap-3">
-                                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                                <span className="text-xs font-bold dark:text-zinc-200 uppercase tracking-widest">Visual Editor v2.0</span>
+                        {/* Live Plain English Logic Summary Banner */}
+                        <div className="bg-zinc-900/90 border border-zinc-700/80 text-white backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 max-w-[580px] sm:max-w-[700px] border-l-4 border-l-indigo-500">
+                            <div className="p-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 shrink-0">
+                                <Zap className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                                <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                                    Live Logic Rule Preview
+                                </div>
+                                <div className="text-xs font-mono font-medium leading-relaxed mt-0.5">
+                                    {(() => {
+                                        const sourceNode = nodes.find(n => n.type === 'source');
+                                        const logicNode = nodes.find(n => n.type === 'logic');
+                                        const actionNode = nodes.find(n => n.type === 'action');
+
+                                        if (!sourceNode && !logicNode && !actionNode) {
+                                            return <span className="text-zinc-400">Drag Sensor ➔ Logic ➔ Action nodes onto canvas to create rules</span>;
+                                        }
+
+                                        const sensorName = sourceNode?.data?.name || "Sensor";
+                                        const sensorMetric = sourceNode?.data?.metricPath || "Metric";
+                                        const operator = logicNode?.data?.condition?.operator || ">";
+                                        const threshold = logicNode?.data?.condition?.value ?? logicNode?.data?.deltaThreshold ?? 0;
+                                        const actuatorName = actionNode?.data?.deviceName || "Actuator";
+                                        const actuatorKey = actionNode?.data?.actuatorKey || "Output Pin";
+                                        const actuatorState = actionNode?.data?.setValue ? "ON" : "OFF";
+
+                                        return (
+                                            <span className="flex items-center gap-1.5 flex-wrap">
+                                                <span className="font-extrabold text-indigo-400">IF</span>
+                                                <span className="bg-indigo-500/20 px-2 py-0.5 rounded-lg border border-indigo-500/30 text-indigo-200">[{sensorName} • {sensorMetric}]</span>
+                                                <span className="font-extrabold text-amber-400">IS {operator} {threshold}</span>
+                                                <span className="font-extrabold text-emerald-400">➔ THEN SET</span>
+                                                <span className="bg-emerald-500/20 px-2 py-0.5 rounded-lg border border-emerald-500/30 text-emerald-200">[{actuatorName} • {actuatorKey}]</span>
+                                                <span className="font-extrabold text-emerald-300">TO [{actuatorState}]</span>
+                                            </span>
+                                        );
+                                    })()}
+                                </div>
                             </div>
                         </div>
 
