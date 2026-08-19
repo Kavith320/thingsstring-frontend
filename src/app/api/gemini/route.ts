@@ -6,7 +6,7 @@ export async function POST(req: Request) {
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) {
             return NextResponse.json(
-                { message: "API Key not configured." },
+                { message: "GEMINI_API_KEY is not configured in your .env file. Please set GEMINI_API_KEY to enable Gemini AI responses." },
                 { status: 500 }
             );
         }

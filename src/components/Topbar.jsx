@@ -1,6 +1,6 @@
 "use client";
 
-import { MoreVertical, LogOut } from "lucide-react";
+import { MoreVertical, LogOut, Sparkles } from "lucide-react";
 import { logout } from "@/lib/auth/actions";
 
 export default function Topbar({
@@ -33,6 +33,14 @@ export default function Topbar({
 
         {/* Right side */}
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => typeof window !== "undefined" && window.dispatchEvent(new CustomEvent("open-ai-copilot"))}
+            className="flex items-center gap-1.5 rounded-xl border border-indigo-500/20 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 px-3 py-2 text-xs font-semibold hover:bg-indigo-500/20 transition shadow-sm"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-indigo-500" />
+            <span className="hidden sm:inline">ThingsString AI</span>
+          </button>
+
           <button
             onClick={logout}
             className="

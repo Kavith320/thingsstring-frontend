@@ -20,7 +20,7 @@ const nav = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/devices", label: "Devices", icon: Radio },
     { href: "/automation", label: "Automation", icon: Zap },
-    { href: "/ai", label: "AI Assistant", icon: Bot },
+    { href: "/ai", label: "ThingsString AI", icon: Bot },
     { href: "/settings", label: "Settings", icon: Settings },
 ];
 

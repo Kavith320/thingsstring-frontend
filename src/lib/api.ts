@@ -36,8 +36,15 @@ export async function apiRequest<T = any>(
     }
 
     if (!res.ok) {
-        console.error(`API Error (${res.status}):`, data);
-        const msg = data?.message || data?.error || `API error (${res.status})`;
+        let msg = `API error (${res.status})`;
+        if (typeof data === "object" && data !== null) {
+            msg = data.message || data.error || msg;
+        } else if (typeof data === "string" && (data.includes("<html") || data.includes("<!DOCTYPE") || data.includes("</body>"))) {
+            msg = `Backend connection error (${res.status}). The server at ${API_URL || 'local'} returned an HTML error page instead of JSON. Check your backend status or NEXT_PUBLIC_API_URL setting in .env.`;
+        } else if (typeof data === "string" && data.trim()) {
+            msg = data;
+        }
+        console.error(`API Error (${res.status}):`, msg);
         throw new Error(msg);
     }
 

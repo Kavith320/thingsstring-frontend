@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
+import GlobalAiCopilot from "@/components/common/GlobalAiCopilot";
 
 export default function DashboardLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -40,6 +41,9 @@ export default function DashboardLayout({ children }) {
           </main>
         </div>
       </div>
+
+      {/* Global AI Copilot Agent across all dashboard pages */}
+      <GlobalAiCopilot />
     </div>
   );
 }
