@@ -32,13 +32,19 @@ export default function LoginClient() {
 
   async function handleLogin(e) {
     e.preventDefault();
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !password) {
+      setError("Please enter both email and password.");
+      return;
+    }
+
     setLoading(true);
     setError("");
 
     try {
       const data = await apiRequest("/api/auth/login", {
         method: "POST",
-        body: { email, password },
+        body: { email: cleanEmail, password },
       });
 
       setAuth({

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
     AreaChart,
     Area,
@@ -12,6 +13,9 @@ import {
     ReferenceArea,
     Tooltip,
 } from "recharts";
+import { apiRequest } from "@/lib/api";
+import { Maximize2, Minimize2, RotateCcw, Clock, Layers } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 /* -------- Types -------- */
 interface TelemetryPoint {
@@ -28,8 +32,20 @@ interface ChartPoint extends TelemetryPoint {
 }
 
 interface TelemetryGraphProps {
+    deviceId?: string;
     history?: TelemetryPoint[];
 }
+
+type TimeRange = "5m" | "1h" | "24h" | "7d" | "30d" | "all";
+
+const TIME_RANGES: { label: string; value: TimeRange; ms: number }[] = [
+    { label: "5m", value: "5m", ms: 5 * 60 * 1000 },
+    { label: "1h", value: "1h", ms: 60 * 60 * 1000 },
+    { label: "24h", value: "24h", ms: 24 * 60 * 60 * 1000 },
+    { label: "7d", value: "7d", ms: 7 * 24 * 60 * 60 * 1000 },
+    { label: "30d", value: "30d", ms: 30 * 24 * 60 * 60 * 1000 },
+    { label: "All", value: "all", ms: Infinity },
+];
 
 /* -------- Mongo ObjectId -> timestamp helpers -------- */
 function objectIdToMs(oid: any) {
@@ -41,15 +57,15 @@ function objectIdToMs(oid: any) {
 
 /* ---------------- chart palette ---------------- */
 const CHART_COLORS = [
-    "#22c55e", // green-500
-    "#3b82f6", // blue-500
+    "#6366f1", // indigo-500
+    "#10b981", // emerald-500
     "#f59e0b", // amber-500
     "#ef4444", // red-500
-    "#a855f7", // purple-500
+    "#8b5cf6", // purple-500
     "#06b6d4", // cyan-500
     "#f97316", // orange-500
+    "#ec4899", // pink-500
     "#84cc16", // lime-500
-    "#e11d48", // rose-600
     "#14b8a6", // teal-500
 ];
 
@@ -64,26 +80,26 @@ function clampDomain([a, b]: [number, number]): [number, number] | null {
     return a < b ? [a, b] : [b, a];
 }
 
-/* ---------------- dark tooltip (fixes white box) ---------------- */
+/* ---------------- dark tooltip ---------------- */
 function CustomTooltip({ active, payload, label }: any) {
     if (!active || !payload || !payload.length) return null;
 
     return (
-        <div className="rounded-xl border border-zinc-200/50 bg-white/60 dark:border-zinc-700/50 dark:bg-zinc-950/60 backdrop-blur-xl px-4 py-3 text-xs shadow-xl">
-            <div className="mb-2 text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
+        <div className="rounded-2xl border border-zinc-200/80 bg-white/90 dark:border-zinc-800 dark:bg-zinc-950/90 backdrop-blur-xl px-4 py-3 text-xs shadow-2xl z-50">
+            <div className="mb-2.5 text-[10px] font-mono font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider border-b border-zinc-100 dark:border-zinc-800 pb-1.5">
                 {label ? new Date(label).toLocaleString() : ""}
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-2 min-w-[140px]">
                 {payload.map((item: any) => (
-                    <div key={item.dataKey} className="flex items-center justify-between gap-6">
+                    <div key={item.dataKey} className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full" style={{ background: item.color }} />
-                            <span className="truncate font-medium text-zinc-700 dark:text-zinc-300">
+                            <span className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ background: item.color }} />
+                            <span className="truncate font-semibold text-zinc-700 dark:text-zinc-300">
                                 {item.name}
                             </span>
                         </div>
-                        <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100">
+                        <span className="font-mono font-extrabold text-zinc-900 dark:text-white bg-zinc-100 dark:bg-zinc-900 px-2 py-0.5 rounded-md">
                             {typeof item.value === "number" ? item.value.toFixed(2) : String(item.value)}
                         </span>
                     </div>
@@ -94,24 +110,71 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 /* ---------------- main component ---------------- */
-export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
+export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGraphProps) {
     const [open, setOpen] = useState(false);
     const [mounted, setMounted] = useState(false);
-
-    useEffect(() => {
-        setMounted(true);
-    }, []);
+    const [selectedRange, setSelectedRange] = useState<TimeRange>("24h");
+    const [fetchedData, setFetchedData] = useState<TelemetryPoint[]>([]);
 
     // Zoom state
     const [xDomain, setXDomain] = useState<[number, number] | null>(null);
     const [refLeft, setRefLeft] = useState<string | number | null>(null);
     const [refRight, setRefRight] = useState<string | number | null>(null);
 
-    // Selected keys (default will be chosen without useEffect)
+    // Selected keys
     const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
-
-    // Prevent re-initializing defaults repeatedly
     const didInitDefaults = useRef(false);
+
+    useEffect(() => {
+        setMounted(true);
+    }, []);
+
+    // Escape key listener for fullscreen modal
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape" && open) {
+                setOpen(false);
+            }
+        };
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [open]);
+
+    // Silent seamless data fetching from backend (no screen flashing)
+    const loadRangeData = useCallback(async (range: TimeRange, silent = false) => {
+        if (!deviceId) return;
+        try {
+            const limit = range === "5m" ? 100 : range === "1h" ? 300 : range === "24h" ? 2000 : 5000;
+            const res = await apiRequest(`/api/devices/${deviceId}/telemetry?limit=${limit}`);
+            const list = Array.isArray(res) ? res : res?.telemetry || res?.items || [];
+            
+            if (silent) {
+                // Seamlessly merge new datapoints into state without unmounting / flickering chart
+                setFetchedData((prev) => {
+                    if (prev.length === 0) return list;
+                    const existingKeys = new Set(prev.map(p => p._id || p.ts || p.createdAt));
+                    const freshPoints = list.filter((p: any) => !existingKeys.has(p._id || p.ts || p.createdAt));
+                    if (freshPoints.length === 0) return prev;
+                    return [...prev, ...freshPoints];
+                });
+            } else {
+                setFetchedData(list);
+            }
+        } catch (e) {
+            console.error("Failed to load telemetry data", e);
+        }
+    }, [deviceId]);
+
+    useEffect(() => {
+        if (deviceId) {
+            loadRangeData(selectedRange, false);
+            // Polling interval to silently append new points every 5 seconds
+            const interval = setInterval(() => {
+                loadRangeData(selectedRange, true);
+            }, 5000);
+            return () => clearInterval(interval);
+        }
+    }, [selectedRange, deviceId, loadRangeData]);
 
     function resetZoom() {
         setXDomain(null);
@@ -119,13 +182,15 @@ export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
         setRefRight(null);
     }
 
-    // Normalize to chart points (last 24h) WITHOUT Date.now() in render loop
-    const nowRef = useRef(Date.now()); // stable now until refresh/page reload
+    // Determine dataset: prefer fetchedData if present, fallback to history prop
+    const rawData = fetchedData.length > 0 ? fetchedData : history;
 
+    // Filter data by selected time range
     const chartData = useMemo(() => {
-        const fromMs = nowRef.current - 24 * 60 * 60 * 1000;
+        const rangeConfig = TIME_RANGES.find(r => r.value === selectedRange);
+        const cutoffMs = rangeConfig && rangeConfig.ms !== Infinity ? Date.now() - rangeConfig.ms : 0;
 
-        return (history || [])
+        return (rawData || [])
             .map((h) => {
                 const ms =
                     (h.updatedAt && new Date(h.updatedAt).getTime()) ||
@@ -137,9 +202,9 @@ export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
 
                 return { ...h, __ms: ms } as ChartPoint;
             })
-            .filter((p) => p.__ms && p.__ms >= fromMs)
+            .filter((p) => p.__ms && (cutoffMs === 0 || p.__ms >= cutoffMs))
             .sort((a, b) => a.__ms - b.__ms);
-    }, [history]);
+    }, [rawData, selectedRange]);
 
     const numericKeys = useMemo(() => {
         const ignore = new Set(["__ms", "_id", "deviceId", "id", "device", "actuators"]);
@@ -156,17 +221,17 @@ export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
     // Set defaults ONCE
     if (!didInitDefaults.current && numericKeys.length) {
         didInitDefaults.current = true;
-        if (!selectedKeys.length) setSelectedKeys(numericKeys.slice(0, 2));
+        if (!selectedKeys.length) setSelectedKeys(numericKeys.slice(0, 3));
     }
 
-    // Mobile-friendly: keep max 2 lines for readability
-    const mobileMax = 2;
     const safeSelectedKeys = useMemo(() => {
-        // if user selected too many, clamp for mobile usability
-        if (selectedKeys.length <= 4) return selectedKeys;
-        return selectedKeys.slice(0, 4);
-    }, [selectedKeys]);
+        if (selectedKeys.length === 0 && numericKeys.length > 0) {
+            return numericKeys.slice(0, 2);
+        }
+        return selectedKeys;
+    }, [selectedKeys, numericKeys]);
 
+    // Multi-metric domain calculation with auto-scaling padding
     const yDomain = useMemo(() => {
         if (!chartData.length || !safeSelectedKeys.length) return ["auto", "auto"];
 
@@ -186,86 +251,152 @@ export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
         if (!Number.isFinite(min) || !Number.isFinite(max)) return ["auto", "auto"];
         if (min === max) return [min - 1, max + 1];
 
-        const padding = (max - min) * 0.1; // slightly more padding for area chart
+        const padding = (max - min) * 0.12;
         const lo = Math.floor((min - padding) * 100) / 100;
         const hi = Math.ceil((max + padding) * 100) / 100;
         return [lo, hi];
     }, [chartData, safeSelectedKeys]);
 
+    // Quantized clean time ticks (00:00, 03:00, 06:00, 09:00, 12:00... or 00:00 Midnight dates)
+    const quantizedTicks = useMemo(() => {
+        if (!chartData.length) return [];
+        const minMs = xDomain ? xDomain[0] : chartData[0].__ms;
+        const maxMs = xDomain ? xDomain[1] : chartData[chartData.length - 1].__ms;
+
+        if (!Number.isFinite(minMs) || !Number.isFinite(maxMs) || minMs >= maxMs) return [];
+
+        const ticks: number[] = [];
+
+        if (selectedRange === "5m") {
+            const stepMs = 60 * 1000;
+            let start = Math.ceil(minMs / stepMs) * stepMs;
+            for (let t = start; t <= maxMs; t += stepMs) {
+                ticks.push(t);
+            }
+        } else if (selectedRange === "1h") {
+            const stepMs = 10 * 60 * 1000;
+            let start = Math.ceil(minMs / stepMs) * stepMs;
+            for (let t = start; t <= maxMs; t += stepMs) {
+                ticks.push(t);
+            }
+        } else if (selectedRange === "24h") {
+            const stepMs = 3 * 60 * 60 * 1000;
+            const d = new Date(minMs);
+            d.setMinutes(0, 0, 0);
+            d.setHours(Math.floor(d.getHours() / 3) * 3);
+            let t = d.getTime();
+            while (t <= maxMs) {
+                if (t >= minMs) ticks.push(t);
+                t += stepMs;
+            }
+        } else {
+            const d = new Date(minMs);
+            d.setHours(0, 0, 0, 0);
+            let t = d.getTime();
+            const stepMs = selectedRange === "30d" ? 5 * 24 * 60 * 60 * 1000 : selectedRange === "7d" ? 24 * 60 * 60 * 1000 : 2 * 24 * 60 * 60 * 1000;
+            while (t <= maxMs) {
+                if (t >= minMs) ticks.push(t);
+                t += stepMs;
+            }
+        }
+
+        return ticks;
+    }, [chartData, xDomain, selectedRange]);
+
     const dataRangeText =
         chartData.length > 0
-            ? `${new Date(chartData[0].__ms).toLocaleString()} → ${new Date(
+            ? `${new Date(chartData[0].__ms).toLocaleTimeString()} → ${new Date(
                 chartData[chartData.length - 1].__ms
-            ).toLocaleString()}`
+            ).toLocaleTimeString()}`
             : "-";
 
     function toggleKey(k: string) {
         setSelectedKeys((prev) => {
             const has = prev.includes(k);
             if (has) return prev.filter((x) => x !== k);
-
-            // allow up to 4 (desktop). for mobile readability we still show fine.
-            if (prev.length >= 4) return prev;
             return [...prev, k];
         });
     }
 
     function GraphInner({ fullscreen = false }: { fullscreen?: boolean }) {
         const heightCls = fullscreen
-            ? "h-[72vh] sm:h-[76vh] lg:h-[80vh]"
-            : "h-[260px] sm:h-[320px] lg:h-[380px]";
-
-        const maxChip = 4;
-
-        const showKeys =
-            fullscreen
-                ? safeSelectedKeys
-                : safeSelectedKeys.length > mobileMax
-                    ? safeSelectedKeys.slice(0, mobileMax)
-                    : safeSelectedKeys;
+            ? "h-[60vh] sm:h-[70vh] lg:h-[75vh]"
+            : "h-[280px] sm:h-[360px] lg:h-[400px]";
 
         return (
-            <div className="space-y-4">
-                {/* controls */}
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                        Select fields (max {maxChip}):
+            <div className="space-y-4 flex flex-col h-full">
+                {/* Header Toolbar */}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-100 dark:border-zinc-800/80 pb-3 shrink-0">
+                    {/* Time Range Selector */}
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+                        <span className="text-xs font-bold text-zinc-400 mr-1 flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5" />
+                            Range:
+                        </span>
+                        {TIME_RANGES.map((r) => (
+                            <button
+                                key={r.value}
+                                onClick={() => {
+                                    setSelectedRange(r.value);
+                                    resetZoom();
+                                }}
+                                className={cn(
+                                    "px-2.5 py-1 text-xs font-bold rounded-xl transition-all whitespace-nowrap",
+                                    selectedRange === r.value
+                                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                                        : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/80 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                                )}
+                            >
+                                {r.label}
+                            </button>
+                        ))}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
-                            {chartData.length} pts
+                    {/* Actions */}
+                    <div className="flex items-center justify-between sm:justify-end gap-2">
+                        <div className="text-[11px] font-mono text-zinc-400 flex items-center gap-1.5">
+                            <span className="flex h-2 w-2 relative">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                            </span>
+                            <span>{chartData.length} pts</span>
                         </div>
 
                         <button
                             onClick={resetZoom}
-                            className="rounded-lg border px-3 py-1.5 text-xs font-medium border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900 transition"
+                            className="p-2 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition flex items-center gap-1 text-xs font-bold"
+                            title="Reset Zoom"
                         >
-                            Reset Zoom
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Reset</span>
                         </button>
 
-                        {!fullscreen && (
+                        {!fullscreen ? (
                             <button
                                 onClick={() => setOpen(true)}
-                                className="rounded-lg border px-3 py-1.5 text-xs font-medium border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900 transition"
+                                className="p-2 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition flex items-center gap-1 text-xs font-bold"
                             >
-                                Fullscreen
+                                <Maximize2 className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">Fullscreen</span>
                             </button>
-                        )}
-
-                        {fullscreen && (
+                        ) : (
                             <button
                                 onClick={() => setOpen(false)}
-                                className="rounded-lg bg-zinc-900 text-white px-3 py-1.5 text-xs font-medium dark:bg-zinc-100 dark:text-black transition"
+                                className="p-2 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-black font-bold text-xs transition flex items-center gap-1 shadow-lg"
                             >
-                                Close
+                                <Minimize2 className="w-3.5 h-3.5" />
+                                Exit Fullscreen
                             </button>
                         )}
                     </div>
                 </div>
 
-                {/* chips */}
-                <div className="flex flex-wrap items-center gap-2">
+                {/* Metric Field Chips */}
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 shrink-0">
+                    <span className="text-xs font-bold text-zinc-400 shrink-0 flex items-center gap-1">
+                        <Layers className="w-3.5 h-3.5" />
+                        Metrics:
+                    </span>
                     {numericKeys.map((k) => {
                         const checked = safeSelectedKeys.includes(k);
                         const stroke = colorForKey(k, numericKeys);
@@ -274,15 +405,14 @@ export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
                             <button
                                 key={k}
                                 onClick={() => toggleKey(k)}
-                                className={[
-                                    "text-xs px-3 py-1.5 rounded-full border flex items-center gap-2 transition font-medium",
+                                className={cn(
+                                    "text-xs px-3 py-1 rounded-full border flex items-center gap-2 transition font-bold whitespace-nowrap shrink-0",
                                     checked
                                         ? "border-zinc-900 bg-zinc-900 text-white dark:border-white dark:bg-white dark:text-black shadow-sm"
-                                        : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-700",
-                                ].join(" ")}
+                                        : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-700"
+                                )}
                             >
-                                <span className="inline-block h-2 w-2 rounded-full ring-2 ring-inset ring-black/10 dark:ring-white/10" style={{ background: stroke }} />
-                                {checked ? "" : ""}
+                                <span className="inline-block h-2.5 w-2.5 rounded-full shadow-sm" style={{ background: stroke }} />
                                 {k}
                             </button>
                         );
@@ -291,34 +421,31 @@ export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
                     {safeSelectedKeys.length > 0 && (
                         <button
                             onClick={() => setSelectedKeys(numericKeys.slice(0, 2))}
-                            className="text-xs px-2 py-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition"
+                            className="text-xs px-2 py-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition font-bold shrink-0"
                         >
                             Reset
                         </button>
                     )}
                 </div>
 
-                {/* chart */}
-                <div className="rounded-3xl border p-1 sm:p-4 border-zinc-100 bg-zinc-50/50 dark:border-zinc-800/50 dark:bg-zinc-900/20 backdrop-blur-sm">
+                {/* Chart Viewport */}
+                <div className="flex-1 rounded-3xl border p-2 sm:p-4 border-zinc-100 bg-zinc-50/50 dark:border-zinc-800/50 dark:bg-zinc-900/20 backdrop-blur-sm flex flex-col min-h-0">
                     <div className={`w-full ${heightCls}`}>
                         {mounted ? (
                             <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                                 <AreaChart
                                     data={chartData}
                                     onMouseDown={(e: any) => {
-                                        if (!fullscreen) return;
                                         if (!e || e.activeLabel == null) return;
                                         setRefLeft(e.activeLabel);
                                         setRefRight(null);
                                     }}
                                     onMouseMove={(e: any) => {
-                                        if (!fullscreen) return;
                                         if (refLeft == null) return;
                                         if (!e || e.activeLabel == null) return;
                                         setRefRight(e.activeLabel);
                                     }}
                                     onMouseUp={() => {
-                                        if (!fullscreen) return;
                                         if (refLeft == null || refRight == null) {
                                             setRefLeft(null);
                                             setRefRight(null);
@@ -331,26 +458,32 @@ export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
                                     }}
                                 >
                                     <defs>
-                                        {(fullscreen ? safeSelectedKeys : showKeys).map((k) => (
+                                        {safeSelectedKeys.map((k) => (
                                             <linearGradient key={k} id={`color-${k}`} x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor={colorForKey(k, numericKeys)} stopOpacity={0.3} />
+                                                <stop offset="5%" stopColor={colorForKey(k, numericKeys)} stopOpacity={0.35} />
                                                 <stop offset="95%" stopColor={colorForKey(k, numericKeys)} stopOpacity={0} />
                                             </linearGradient>
                                         ))}
                                     </defs>
 
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#52525b" strokeOpacity={0.1} vertical={false} />
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#71717a" strokeOpacity={0.2} vertical={true} />
 
                                     <XAxis
                                         dataKey="__ms"
                                         type="number"
                                         domain={xDomain || ["dataMin", "dataMax"]}
-                                        tickFormatter={(ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        ticks={quantizedTicks.length > 0 ? quantizedTicks : undefined}
+                                        tickFormatter={(ms) => {
+                                            const d = new Date(ms);
+                                            return selectedRange === "7d" || selectedRange === "30d" || selectedRange === "all"
+                                                ? `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}`
+                                                : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                        }}
                                         stroke="#a1a1aa"
-                                        fontSize={11}
-                                        tickLine={false}
+                                        fontSize={10}
+                                        tickLine={{ stroke: "#a1a1aa", strokeOpacity: 0.3 }}
                                         axisLine={false}
-                                        minTickGap={30}
+                                        minTickGap={fullscreen ? 40 : 30}
                                     />
 
                                     <YAxis
@@ -371,16 +504,15 @@ export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
                                         <ReferenceArea x1={refLeft} x2={refRight} strokeOpacity={0.1} fillOpacity={0.1} />
                                     ) : null}
 
-                                    {(fullscreen ? safeSelectedKeys : showKeys).map((k) => (
+                                    {safeSelectedKeys.map((k) => (
                                         <Area
                                             key={k}
                                             type="monotone"
                                             dataKey={k}
                                             stroke={colorForKey(k, numericKeys)}
                                             fill={`url(#color-${k})`}
-                                            strokeWidth={2}
-                                            isAnimationActive={fullscreen} // smoother only in fullscreen
-                                            animationDuration={500}
+                                            strokeWidth={2.5}
+                                            isAnimationActive={false} // Prevents chart flash on live point appends
                                             activeDot={{ r: 6, strokeWidth: 0, fill: colorForKey(k, numericKeys) }}
                                         />
                                     ))}
@@ -406,14 +538,14 @@ export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
                             </ResponsiveContainer>
                         ) : (
                             <div className="w-full h-full flex items-center justify-center text-xs text-zinc-400">
-                                Loading chart...
+                                Loading telemetry chart...
                             </div>
                         )}
                     </div>
 
-                    <div className="mt-3 flex items-center justify-between text-[10px] text-zinc-400 px-2">
-                        <span>Data range: {dataRangeText}</span>
-                        <span>{fullscreen ? "Drag to zoom" : "Use Fullscreen to zoom"}</span>
+                    <div className="mt-3 flex items-center justify-between text-[10px] text-zinc-400 font-mono px-2 shrink-0">
+                        <span>Range: {dataRangeText}</span>
+                        <span>Drag on graph to zoom in</span>
                     </div>
                 </div>
             </div>
@@ -422,18 +554,28 @@ export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
 
     if (!chartData.length) {
         return (
-            <div className="p-8 text-center rounded-3xl border border-dashed border-zinc-300 dark:border-zinc-800">
-                <div className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Waiting for telemetry...</div>
-                <div className="text-xs text-zinc-400 mt-1">Data from the last 24h will appear here</div>
-            </div>
-        );
-    }
-
-    if (!numericKeys.length) {
-        return (
-            <div className="p-8 text-center rounded-3xl border border-dashed border-zinc-300 dark:border-zinc-800">
-                <div className="text-sm font-medium text-zinc-500 dark:text-zinc-400">No numeric data found</div>
-                <div className="text-xs text-zinc-400 mt-1">This device hasn't sent any number values yet.</div>
+            <div className="p-8 text-center rounded-3xl border border-dashed border-zinc-300 dark:border-zinc-800 space-y-3">
+                <div className="flex items-center justify-center gap-1.5">
+                    {TIME_RANGES.map((r) => (
+                        <button
+                            key={r.value}
+                            onClick={() => {
+                                setSelectedRange(r.value);
+                                resetZoom();
+                            }}
+                            className={cn(
+                                "px-2.5 py-1 text-xs font-bold rounded-xl transition-all",
+                                selectedRange === r.value
+                                    ? "bg-indigo-600 text-white shadow-md font-bold"
+                                    : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                            )}
+                        >
+                            {r.label}
+                        </button>
+                    ))}
+                </div>
+                <div className="text-sm font-medium text-zinc-500 dark:text-zinc-400">No telemetry recorded for this time range</div>
+                <div className="text-xs text-zinc-400">Try selecting a broader time range above</div>
             </div>
         );
     }
@@ -442,15 +584,20 @@ export default function TelemetryGraph({ history = [] }: TelemetryGraphProps) {
         <>
             <GraphInner fullscreen={false} />
 
-            {/* Fullscreen Modal */}
-            {open && (
-                <div className="fixed inset-0 z-[100] bg-zinc-950/60 backdrop-blur-md p-2 sm:p-6 flex items-center justify-center animate-in fade-in duration-200">
-                    <div className="w-full max-w-6xl rounded-[2rem] border border-white/10 bg-zinc-900/90 backdrop-blur-2xl shadow-2xl overflow-hidden ring-1 ring-white/10">
-                        <div className="p-6">
-                            <GraphInner fullscreen />
-                        </div>
+            {/* Fullscreen Portal - Mounts to document.body so it breaks out of parent container frames */}
+            {open && mounted && createPortal(
+                <div
+                    className="fixed inset-0 z-[99999] bg-zinc-950/90 backdrop-blur-2xl p-3 sm:p-6 flex items-center justify-center animate-in fade-in duration-200"
+                    onClick={() => setOpen(false)}
+                >
+                    <div
+                        className="w-full max-w-7xl h-[92vh] rounded-[2.5rem] border border-white/15 bg-zinc-900/95 backdrop-blur-2xl shadow-2xl overflow-hidden ring-1 ring-white/10 p-4 sm:p-8 flex flex-col animate-in zoom-in-95 duration-200"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <GraphInner fullscreen />
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
         </>
     );

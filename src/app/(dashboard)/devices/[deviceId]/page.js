@@ -410,20 +410,16 @@ export default function DeviceDetailsPage() {
         </div>
       </div>
 
-      {/* ✅ Actuators (hide / show nice empty state) */}
-      <Card
-        title="Actuators (Mode + Manual Control)"
-        right={
-          <div className="text-xs text-zinc-500 dark:text-zinc-400">
-            {actuatorCount ? `${actuatorCount} actuators` : "No actuators"}
-          </div>
-        }
-      >
-        {actuatorCount === 0 ? (
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-300">
-            This device has no actuators configured.
-          </div>
-        ) : (
+      {/* ✅ Actuators (only render when device has actuators) */}
+      {actuatorCount > 0 && (
+        <Card
+          title="Actuators (Mode + Manual Control)"
+          right={
+            <div className="text-xs text-zinc-500 dark:text-zinc-400">
+              {`${actuatorCount} actuators`}
+            </div>
+          }
+        >
           <div className="grid gap-3">
             {Object.entries(meta.controlActuators).map(([actKey, act]) => {
               const type = act?.type || meta.cfgActuators?.[actKey]?.type || "-";
@@ -491,8 +487,8 @@ export default function DeviceDetailsPage() {
               );
             })}
           </div>
-        )}
-      </Card>
+        </Card>
+      )}
 
       {/* ✅ Sensors tiles */}
       <Card title="Sensors (Latest)">
@@ -500,8 +496,8 @@ export default function DeviceDetailsPage() {
       </Card>
 
       {/* Graphs */}
-      <Card title="Telemetry Graphs (Last 24h)">
-        <TelemetryGraph history={history} />
+      <Card title="Telemetry Graphs">
+        <TelemetryGraph deviceId={meta.id} history={history} />
       </Card>
     </div>
   );

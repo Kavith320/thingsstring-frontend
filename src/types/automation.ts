@@ -6,12 +6,17 @@ export interface AutomationFlow {
     intervalSec: number;
     metricPath: string;
     deltaThreshold: number;
+    condition?: {
+        operator: ">" | "<" | ">=" | "<=" | "==" | "!=";
+        value: number;
+    };
     action: {
         deviceId?: string;
         actuatorKey: string;
         setValue: boolean | number | string;
     };
     cooldownSec: number;
+    ui_metadata?: Record<string, any>;
     createdAt: string;
     updatedAt: string;
 }

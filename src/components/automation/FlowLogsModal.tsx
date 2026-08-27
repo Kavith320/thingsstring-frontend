@@ -101,7 +101,11 @@ export default function FlowLogsModal({ flowId, onClose }: FlowLogsModalProps) {
 
                                             <div>
                                                 <div className="text-sm font-bold dark:text-zinc-200 flex items-center gap-2">
-                                                    {log.status === "ran" ? "Action Triggered" : log.status === "skipped" ? "Condition Not Met" : "Execution Error"}
+                                                    {log.status === "ran"
+                                                        ? "Action Triggered"
+                                                        : log.status === "skipped"
+                                                            ? (log.reason?.toLowerCase().includes("offline") ? "Skipped (Device Offline)" : "Condition Not Met")
+                                                            : "Execution Error"}
                                                     <span className="px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-[10px] font-mono text-zinc-500">
                                                         {formatTime(log.ts)}
                                                     </span>

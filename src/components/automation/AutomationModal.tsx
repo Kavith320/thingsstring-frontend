@@ -18,34 +18,47 @@ export default function AutomationModal({ flow, onClose, onSave }: AutomationMod
     const [saving, setSaving] = useState(false);
 
     // Form State
+    const [ruleType, setRuleType] = useState<"condition" | "delta">("condition");
     const [formData, setFormData] = useState({
         name: "",
         deviceId: "", // The sensor device
         intervalSec: 30,
         metricPath: "",
         deltaThreshold: 1.0,
+        condition: {
+            operator: ">" as ">" | "<" | ">=" | "<=" | "==" | "!=",
+            value: 30
+        },
         action: {
             deviceId: "", // The actuator device
             actuatorKey: "",
             setValue: true as boolean | number | string
         },
-        cooldownSec: 60
+        cooldownSec: 60,
+        ui_metadata: {} as Record<string, any>
     });
 
     useEffect(() => {
         if (flow) {
+            const hasCondition = !!flow.condition;
+            setRuleType(hasCondition ? "condition" : "delta");
             setFormData({
                 name: flow.name,
                 deviceId: flow.deviceId,
                 intervalSec: flow.intervalSec,
                 metricPath: flow.metricPath,
-                deltaThreshold: flow.deltaThreshold,
+                deltaThreshold: flow.deltaThreshold ?? 1.0,
+                condition: flow.condition ? {
+                    operator: flow.condition.operator,
+                    value: flow.condition.value
+                } : { operator: ">", value: 30 },
                 action: {
                     deviceId: flow.action.deviceId || flow.deviceId, // fallback to same device
                     actuatorKey: flow.action.actuatorKey,
                     setValue: flow.action.setValue
                 },
-                cooldownSec: flow.cooldownSec
+                cooldownSec: flow.cooldownSec,
+                ui_metadata: flow.ui_metadata || {}
             });
         }
     }, [flow]);
@@ -79,9 +92,25 @@ export default function AutomationModal({ flow, onClose, onSave }: AutomationMod
         try {
             const endpoint = flow ? `/api/automation/flows/${flow._id}` : "/api/automation/flows";
             const method = flow ? "PUT" : "POST";
+
+            const payload: any = {
+                name: formData.name,
+                deviceId: formData.deviceId,
+                intervalSec: formData.intervalSec,
+                metricPath: formData.metricPath,
+                deltaThreshold: formData.deltaThreshold,
+                action: formData.action,
+                cooldownSec: formData.cooldownSec,
+                ui_metadata: formData.ui_metadata
+            };
+
+            if (ruleType === "condition") {
+                payload.condition = formData.condition;
+            }
+
             await apiRequest(endpoint, {
                 method,
-                body: formData
+                body: payload
             });
             onSave();
         } catch (e: any) {
@@ -150,11 +179,37 @@ export default function AutomationModal({ flow, onClose, onSave }: AutomationMod
 
                     {/* Trigger Config */}
                     <section className="p-6 rounded-3xl bg-indigo-500/5 border border-indigo-500/10 space-y-4">
-                        <div className="flex items-center gap-2 mb-2">
-                            <div className="p-1.5 rounded-lg bg-indigo-500 text-white">
-                                <Activity className="w-4 h-4" />
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                                <div className="p-1.5 rounded-lg bg-indigo-500 text-white">
+                                    <Activity className="w-4 h-4" />
+                                </div>
+                                <h4 className="font-bold text-indigo-900 dark:text-indigo-300">1. Trigger Source</h4>
                             </div>
-                            <h4 className="font-bold text-indigo-900 dark:text-indigo-300">1. Trigger Source</h4>
+
+                            {/* Rule Type selector */}
+                            <div className="flex p-1 bg-white dark:bg-zinc-900 rounded-xl border border-indigo-500/10 text-xs font-bold">
+                                <button
+                                    type="button"
+                                    onClick={() => setRuleType("condition")}
+                                    className={cn(
+                                        "px-2.5 py-1 rounded-lg transition-all",
+                                        ruleType === "condition" ? "bg-indigo-600 text-white shadow-sm" : "text-zinc-500 hover:text-indigo-600"
+                                    )}
+                                >
+                                    Algebraic Condition
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setRuleType("delta")}
+                                    className={cn(
+                                        "px-2.5 py-1 rounded-lg transition-all",
+                                        ruleType === "delta" ? "bg-indigo-600 text-white shadow-sm" : "text-zinc-500 hover:text-indigo-600"
+                                    )}
+                                >
+                                    Delta Filter
+                                </button>
+                            </div>
                         </div>
 
                         <div className="space-y-4">
@@ -183,7 +238,7 @@ export default function AutomationModal({ flow, onClose, onSave }: AutomationMod
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <label className="block">
-                                    <span className="text-xs font-bold text-indigo-900/40 dark:text-indigo-300/40 uppercase tracking-widest ml-1">Metric / Value</span>
+                                    <span className="text-xs font-bold text-indigo-900/40 dark:text-indigo-300/40 uppercase tracking-widest ml-1">Metric Key</span>
                                     <div className="relative mt-2">
                                         <MousePointer2 className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
                                         <input
@@ -200,20 +255,58 @@ export default function AutomationModal({ flow, onClose, onSave }: AutomationMod
                                     </div>
                                 </label>
 
-                                <label className="block">
-                                    <span className="text-xs font-bold text-indigo-900/40 dark:text-indigo-300/40 uppercase tracking-widest ml-1">Delta Change</span>
-                                    <div className="relative mt-2">
-                                        <Target className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
-                                        <input
-                                            type="number"
-                                            step="0.01"
-                                            required
-                                            value={formData.deltaThreshold}
-                                            onChange={e => setFormData({ ...formData, deltaThreshold: parseFloat(e.target.value) })}
-                                            className="w-full pl-11 pr-4 py-3 rounded-2xl border border-indigo-500/10 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
-                                        />
+                                {ruleType === "condition" ? (
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <label className="block">
+                                            <span className="text-xs font-bold text-indigo-900/40 dark:text-indigo-300/40 uppercase tracking-widest ml-1">Operator</span>
+                                            <select
+                                                value={formData.condition.operator}
+                                                onChange={e => setFormData({
+                                                    ...formData,
+                                                    condition: { ...formData.condition, operator: e.target.value as any }
+                                                })}
+                                                className="mt-2 w-full px-3 py-3 rounded-2xl border border-indigo-500/10 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm font-bold appearance-none"
+                                            >
+                                                <option value=">">&gt; (Greater)</option>
+                                                <option value="<">&lt; (Less)</option>
+                                                <option value=">=">&gt;= (Greater or Equal)</option>
+                                                <option value="<=">&lt;= (Less or Equal)</option>
+                                                <option value="==">== (Equal)</option>
+                                                <option value="!=">!= (Not Equal)</option>
+                                            </select>
+                                        </label>
+
+                                        <label className="block">
+                                            <span className="text-xs font-bold text-indigo-900/40 dark:text-indigo-300/40 uppercase tracking-widest ml-1">Target Value</span>
+                                            <input
+                                                type="number"
+                                                step="any"
+                                                required
+                                                value={formData.condition.value}
+                                                onChange={e => setFormData({
+                                                    ...formData,
+                                                    condition: { ...formData.condition, value: parseFloat(e.target.value) || 0 }
+                                                })}
+                                                className="mt-2 w-full px-3 py-3 rounded-2xl border border-indigo-500/10 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm font-bold"
+                                            />
+                                        </label>
                                     </div>
-                                </label>
+                                ) : (
+                                    <label className="block">
+                                        <span className="text-xs font-bold text-indigo-900/40 dark:text-indigo-300/40 uppercase tracking-widest ml-1">Delta Threshold</span>
+                                        <div className="relative mt-2">
+                                            <Target className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400" />
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                required
+                                                value={formData.deltaThreshold}
+                                                onChange={e => setFormData({ ...formData, deltaThreshold: parseFloat(e.target.value) })}
+                                                className="w-full pl-11 pr-4 py-3 rounded-2xl border border-indigo-500/10 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
+                                            />
+                                        </div>
+                                    </label>
+                                )}
                             </div>
                         </div>
                     </section>
@@ -231,6 +324,11 @@ export default function AutomationModal({ flow, onClose, onSave }: AutomationMod
                                 <Zap className="w-4 h-4" />
                             </div>
                             <h4 className="font-bold text-emerald-900 dark:text-emerald-300">2. Action Execution</h4>
+                        </div>
+
+                        <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs font-medium text-amber-700 dark:text-amber-300">
+                            <Info className="w-4 h-4 text-amber-500 shrink-0" />
+                            <span>Ensure the target actuator is set to <b>AUTO</b> mode in the Device Panel for automation rules to execute.</span>
                         </div>
 
                         <div className="space-y-4">

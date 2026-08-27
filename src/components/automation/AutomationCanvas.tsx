@@ -47,16 +47,15 @@ interface AutomationCanvasEditorProps {
 
 const defaultEdgeOptions = {
     style: {
-        strokeWidth: 4,
+        strokeWidth: 3,
         stroke: "#6366f1",
-        filter: "drop-shadow(0px 2px 8px rgba(99, 102, 241, 0.5))"
     },
-    type: 'default',
+    type: 'smoothstep',
     animated: true,
     markerEnd: {
         type: MarkerType.ArrowClosed,
-        width: 18,
-        height: 18,
+        width: 14,
+        height: 14,
         color: '#6366f1',
     },
 };
@@ -345,18 +344,10 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
     );
 
     const handleSave = async () => {
-        // Find valid chains: Source -> Logic -> Action
-        // Use getNodes and getEdges to bypass any React state closure issues
         const currentNodes = getNodes();
         const currentEdges = getEdges();
 
         const sourceNodes = currentNodes.filter(n => n.type === 'source');
-
-        if (sourceNodes.length === 0) {
-            setDeployStatus({ message: "Add a trigger source node first!", type: 'info' });
-            setTimeout(() => setDeployStatus(null), 3000);
-            return;
-        }
 
         setSaving(true);
         setDeployProgress(0);
@@ -365,19 +356,35 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
         try {
             // 1. Process Deletions first
             if (onDelete && pendingDeletions.length > 0) {
-                setDeployStatus({ message: "Removing deleted components...", type: 'loading' });
-                // Ensure unique IDs
+                setDeployStatus({ message: "Removing deleted flows...", type: 'loading' });
                 const uniqueDeletions = Array.from(new Set(pendingDeletions));
                 for (let i = 0; i < uniqueDeletions.length; i++) {
                     await onDelete(uniqueDeletions[i]);
-                    // Basic progress estimate including deletions
-                    setDeployProgress(((i + 1) / (uniqueDeletions.length + sourceNodes.length)) * 100);
+                    setDeployProgress(((i + 1) / uniqueDeletions.length) * 100);
                 }
                 setPendingDeletions([]);
             }
 
+            // If canvas has no nodes left, finish after processing deletions
+            if (currentNodes.length === 0) {
+                initialLoadDone.current = false;
+                setDeployStatus({ message: "✓ Canvas cleared & all flows removed from database.", type: 'success' });
+                setTimeout(() => {
+                    setDeployStatus(null);
+                    setDeployProgress(0);
+                }, 4000);
+                setSaving(false);
+                return;
+            }
+
+            if (sourceNodes.length === 0) {
+                setDeployStatus({ message: "Add a trigger source node first!", type: 'info' });
+                setTimeout(() => setDeployStatus(null), 3000);
+                setSaving(false);
+                return;
+            }
+
             // 2. Discover all valid paths (Source -> Logic -> Action)
-            // This supports 1-to-N (one source to many logics) and N-to-1 (many logics to one action)
             const validPaths: { source: Node; logic: Node; action: Node }[] = [];
 
             sourceNodes.forEach(source => {
@@ -496,9 +503,11 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
             const idsWithBackendId = nodes
                 .map(n => n.data?._id)
                 .filter(Boolean) as string[];
+            const initialIds = (initialFlows || []).map(f => f._id).filter(Boolean);
+            const allDeletions = Array.from(new Set([...idsWithBackendId, ...initialIds]));
 
-            if (idsWithBackendId.length > 0) {
-                setPendingDeletions(prev => [...prev, ...idsWithBackendId.map(id => String(id))]);
+            if (allDeletions.length > 0) {
+                setPendingDeletions(prev => [...prev, ...allDeletions.map(id => String(id))]);
             }
 
             setNodes([]);
@@ -514,6 +523,7 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                 <ReactFlow
                     nodes={nodes}
                     edges={edges}
+                    onlyRenderVisibleElements={true}
                     onNodesChange={onNodesChange}
                     onEdgesChange={onEdgesChange}
                     onConnect={onConnect}
@@ -549,7 +559,6 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                         </button>
                         <button
                             onClick={() => {
-                                // Find any node with an ID to open general history
                                 const anySavedNode = nodes.find(n => n.data?._id);
                                 if (anySavedNode) setSelectedFlowLogs(String(anySavedNode.data._id));
                                 else {
@@ -576,54 +585,8 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                         </button>
                     </Panel>
 
-                    <Panel position="top-left" className="m-4 flex flex-col gap-3">
-                        {/* Live Plain English Logic Summary Banner */}
-                        <div className="bg-zinc-900/90 border border-zinc-700/80 text-white backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 max-w-[580px] sm:max-w-[700px] border-l-4 border-l-indigo-500">
-                            <div className="p-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 shrink-0">
-                                <Zap className="w-4 h-4" />
-                            </div>
-                            <div className="min-w-0">
-                                <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                                    Live Logic Rule Preview
-                                </div>
-                                <div className="text-xs font-mono font-medium leading-relaxed mt-0.5">
-                                    {(() => {
-                                        const sourceNode = nodes.find(n => n.type === 'source');
-                                        const logicNode = nodes.find(n => n.type === 'logic');
-                                        const actionNode = nodes.find(n => n.type === 'action');
-
-                                        if (!sourceNode && !logicNode && !actionNode) {
-                                            return <span className="text-zinc-400">Drag Sensor ➔ Logic ➔ Action nodes onto canvas to create rules</span>;
-                                        }
-
-                                        const sourceData = (sourceNode?.data || {}) as any;
-                                        const logicData = (logicNode?.data || {}) as any;
-                                        const actionData = (actionNode?.data || {}) as any;
-
-                                        const sensorName = String(sourceData.name || "Sensor");
-                                        const sensorMetric = String(sourceData.metricPath || "Metric");
-                                        const operator = String(logicData.condition?.operator || ">");
-                                        const threshold = String(logicData.condition?.value ?? logicData.deltaThreshold ?? 0);
-                                        const actuatorName = String(actionData.deviceName || "Actuator");
-                                        const actuatorKey = String(actionData.actuatorKey || "Output Pin");
-                                        const actuatorState = actionData.setValue ? "ON" : "OFF";
-
-                                        return (
-                                            <span className="flex items-center gap-1.5 flex-wrap">
-                                                <span className="font-extrabold text-indigo-400">IF</span>
-                                                <span className="bg-indigo-500/20 px-2 py-0.5 rounded-lg border border-indigo-500/30 text-indigo-200">[{sensorName} • {sensorMetric}]</span>
-                                                <span className="font-extrabold text-amber-400">IS {operator} {threshold}</span>
-                                                <span className="font-extrabold text-emerald-400">➔ THEN SET</span>
-                                                <span className="bg-emerald-500/20 px-2 py-0.5 rounded-lg border border-emerald-500/30 text-emerald-200">[{actuatorName} • {actuatorKey}]</span>
-                                                <span className="font-extrabold text-emerald-300">TO [{actuatorState}]</span>
-                                            </span>
-                                        );
-                                    })()}
-                                </div>
-                            </div>
-                        </div>
-
-                        {deployStatus && (
+                    {deployStatus && (
+                        <Panel position="top-left" className="m-4">
                             <div className={cn(
                                 "flex items-center gap-3 px-4 py-2.5 rounded-2xl border animate-in slide-in-from-left-4 duration-300 shadow-lg backdrop-blur-md max-w-[320px]",
                                 deployStatus.type === 'loading' && "bg-indigo-50/90 border-indigo-200 text-indigo-700 dark:bg-indigo-500/10 dark:border-indigo-500/20 dark:text-indigo-400",
@@ -637,8 +600,8 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                                 {deployStatus.type === 'info' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
                                 <span className="text-[11px] font-bold leading-tight">{deployStatus.message}</span>
                             </div>
-                        )}
-                    </Panel>
+                        </Panel>
+                    )}
 
                     {/* Thin Progress Bar */}
                     {saving && (
@@ -649,13 +612,6 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                             />
                         </div>
                     )}
-
-                    <Panel position="bottom-left" className="m-4">
-                        <div className="flex items-center gap-2 px-4 py-2 bg-indigo-500/5 border border-indigo-500/10 rounded-xl text-[10px] text-indigo-500 font-medium">
-                            <Info className="w-3 h-3" />
-                            Wire pattern: Sensor Node ➔ Logic Node ➔ Action Node
-                        </div>
-                    </Panel>
 
                     {menu && (
                         <div
