@@ -245,8 +245,8 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                     deviceName: actionName,
                     deviceId: actionDeviceId,
                     options: actionOptions,
-                    actuatorKey: flow.action.actuatorKey,
-                    setValue: flow.action.setValue
+                    actuatorKey: flow.action?.actuatorKey || flow.action?.actuator || "",
+                    setValue: flow.action?.setValue !== undefined ? flow.action?.setValue : (flow.action?.state === "ON" || flow.action?.state === true)
                 }
             });
 
@@ -414,6 +414,7 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
 
             // 3. Process each discovered path as a separate flow
             let completed = 0;
+            let deployedCount = 0;
             const totalToProcess = validPaths.length;
 
             for (const path of validPaths) {
@@ -434,9 +435,6 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                 // Check for existing _id. If the nodes were loaded from an existing flow, they'll have the same _id.
                 // Priority: Use the _id if it's common between source, logic and action
                 let existingId = source.data?._id === logic.data?._id && logic.data?._id === action.data?._id ? source.data?._id : null;
-
-                // Fallback: If any node has an _id but it's not a common chain, it's likely a new branch from an old node.
-                // In that case, we treat it as a NEW flow if the chain is unique.
 
                 const flowData = {
                     _id: existingId,
@@ -463,15 +461,8 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                     }
                 };
 
-                console.table({
-                    Path: `${source.id} → ${logic.id} → ${action.id}`,
-                    Sensor: flowData.deviceId,
-                    Actuator: flowData.action.deviceId,
-                    Value: flowData.action.setValue
-                });
-
                 await onSave(flowData);
-
+                deployedCount++;
                 completed++;
                 setDeployProgress((completed / totalToProcess) * 100);
             }
@@ -480,7 +471,11 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
             // everything from the server's single source of truth.
             initialLoadDone.current = false;
 
-            setDeployStatus({ message: "✓ All paths synchronized successfully.", type: 'success' });
+            if (deployedCount > 0) {
+                setDeployStatus({ message: `✓ ${deployedCount} flow(s) synchronized successfully.`, type: 'success' });
+            } else {
+                setDeployStatus({ message: "⚠️ Select measurement & output pin for nodes first.", type: 'info' });
+            }
             setTimeout(() => {
                 setDeployStatus(null);
                 setDeployProgress(0);

@@ -28,7 +28,7 @@ export default function AutomationPage() {
                 apiRequest("/api/automation/flows")
             ]);
             setDevices(devicesData.devices || devicesData || []);
-            setFlows(flowsData.flows || []);
+            setFlows(flowsData.flows || flowsData || []);
         } catch (e: any) {
             setError(e.message || "Failed to load automation data");
         } finally {

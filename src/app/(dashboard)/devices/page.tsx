@@ -1,6 +1,8 @@
 import DevicesClient from "./DevicesClient";
 import { headers } from "next/headers";
 
+export const dynamic = "force-dynamic";
+
 async function getDevices() {
     const API_URL = process.env.NEXT_PUBLIC_API_URL;
     // Forward cookies/auth headers if needed, or use service token
