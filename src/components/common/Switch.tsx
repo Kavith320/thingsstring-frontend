@@ -11,6 +11,8 @@ interface SwitchProps {
     size?: "xs" | "sm" | "md" | "lg";
     variant?: "indigo" | "emerald" | "amber" | "rose" | "blue" | "zinc";
     icon?: LucideIcon;
+    /** Accessible name when there is no visible label */
+    ariaLabel?: string;
 }
 
 export default function Switch({
@@ -20,7 +22,8 @@ export default function Switch({
     label = "",
     size = "md",
     variant = "indigo",
-    icon: Icon
+    icon: Icon,
+    ariaLabel,
 }: SwitchProps) {
     const sizes = {
         xs: { track: "w-9 h-5", dot: "w-4 h-4", translate: "translate-x-4", iconSize: "w-3 h-3" },
@@ -57,7 +60,9 @@ export default function Switch({
             <div className="relative inline-flex items-center">
                 <input
                     type="checkbox"
-                    className="sr-only"
+                    role="switch"
+                    aria-label={ariaLabel || label || undefined}
+                    className="peer sr-only"
                     checked={checked}
                     onChange={(e) => {
                         if (!disabled) {
@@ -70,7 +75,7 @@ export default function Switch({
                     className={`${track} rounded-full transition-all duration-300 ease-in-out ${checked
                         ? `${activeBg} shadow-inner`
                         : "bg-zinc-200 dark:bg-zinc-800"
-                        } ${!disabled && "group-active:scale-95"}`}
+                        } ${!disabled && "group-active:scale-95"} peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-500 peer-focus-visible:ring-offset-2 dark:peer-focus-visible:ring-offset-zinc-900`}
                 />
                 <div
                     className={`absolute left-1 top-1 ${dot} bg-white rounded-full transition-all duration-300 ease-in-out shadow-sm flex items-center justify-center ${checked ? translate : ""

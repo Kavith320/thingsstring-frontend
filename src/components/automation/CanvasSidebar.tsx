@@ -10,7 +10,9 @@ interface CanvasSidebarProps {
 }
 
 export default function CanvasSidebar({ devices }: CanvasSidebarProps) {
-    const [isCollapsed, setIsCollapsed] = useState(false);
+    // Client-only component (loaded with ssr:false). Start collapsed on phones so the
+    // canvas gets the screen; dragging nodes in needs a mouse anyway.
+    const [isCollapsed, setIsCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
 
     const onDragStart = (event: React.DragEvent, nodeType: string, data: any) => {
         event.dataTransfer.setData("application/reactflow", nodeType);
@@ -26,6 +28,7 @@ export default function CanvasSidebar({ devices }: CanvasSidebarProps) {
             {/* Collapse Toggle */}
             <button
                 onClick={() => setIsCollapsed(!isCollapsed)}
+                aria-label={isCollapsed ? "Expand node panel" : "Collapse node panel"}
                 className="absolute -right-3 top-10 w-6 h-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-full flex items-center justify-center shadow-lg hover:bg-indigo-500 hover:text-white transition-all z-20"
             >
                 {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}

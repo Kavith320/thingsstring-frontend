@@ -13,9 +13,9 @@ import {
     ReferenceArea,
     Tooltip,
 } from "recharts";
-import { apiRequest } from "@/lib/api";
+import { apiRequest, NetworkError } from "@/lib/api";
 import { Maximize2, Minimize2, RotateCcw, Clock, Layers } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, humanizeKey } from "@/lib/utils";
 
 /* -------- Types -------- */
 interface TelemetryPoint {
@@ -109,12 +109,26 @@ function CustomTooltip({ active, payload, label }: any) {
     );
 }
 
+const MAX_POINTS = 5000;
+const RANGE_MAX_POINTS = 1000;
+// Used until the backend reports its real retention (TELEMETRY_TTL_DAYS on the server)
+const DEFAULT_RETENTION_DAYS = 7;
+
 /* ---------------- main component ---------------- */
-export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGraphProps) {
+const NO_HISTORY: TelemetryPoint[] = [];
+
+export default function TelemetryGraph({ deviceId, history = NO_HISTORY }: TelemetryGraphProps) {
     const [open, setOpen] = useState(false);
     const [mounted, setMounted] = useState(false);
     const [selectedRange, setSelectedRange] = useState<TimeRange>("24h");
     const [fetchedData, setFetchedData] = useState<TelemetryPoint[]>([]);
+    // From the backend's range response: how long telemetry is kept, and whether the
+    // points are per-bucket averages (then `count` is the bucket size, not a sensor).
+    const [retentionDays, setRetentionDays] = useState<number | null>(null);
+    const [downsampled, setDownsampled] = useState(false);
+    const retentionDaysRef = useRef(DEFAULT_RETENTION_DAYS);
+    // Drops responses for a range the user has already switched away from
+    const requestSeq = useRef(0);
 
     // Zoom state
     const [xDomain, setXDomain] = useState<[number, number] | null>(null);
@@ -143,9 +157,40 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
     // Silent seamless data fetching from backend (no screen flashing)
     const loadRangeData = useCallback(async (range: TimeRange, silent = false) => {
         if (!deviceId) return;
+        const seq = silent ? requestSeq.current : ++requestSeq.current;
         try {
-            const limit = range === "5m" ? 100 : range === "1h" ? 300 : range === "24h" ? 2000 : 5000;
-            const res = await apiRequest(`/api/devices/${deviceId}/telemetry?limit=${limit}`);
+            const base = `/api/devices/${deviceId}/telemetry`;
+            let res: any;
+            if (silent) {
+                // Live refresh: only the newest few raw readings
+                res = await apiRequest(`${base}?limit=20`);
+            } else {
+                // Whole range, downsampled by the server to at most RANGE_MAX_POINTS.
+                // Never ask for more than is kept: buckets are spread evenly from `from`
+                // to now, so a too-early `from` would squeeze the real data into a few points.
+                const rangeMs = TIME_RANGES.find((r) => r.value === range)?.ms ?? Infinity;
+                const keptMs = retentionDaysRef.current * 86_400_000;
+                const from = Date.now() - Math.min(rangeMs, keptMs);
+                try {
+                    res = await apiRequest(`${base}?from=${from}&maxPoints=${RANGE_MAX_POINTS}`, { quiet: true });
+                } catch (rangeErr) {
+                    if (rangeErr instanceof NetworkError) throw rangeErr;
+                    // The server failed to build the range (e.g. a 500 from downsampling).
+                    // Still show something: the newest readings, as before range support.
+                    console.warn("Telemetry range request failed; showing the newest readings instead:", rangeErr);
+                    res = null;
+                }
+
+                if (typeof res?.retentionDays === "number" && res.retentionDays > 0) {
+                    retentionDaysRef.current = res.retentionDays;
+                    if (seq === requestSeq.current) setRetentionDays(res.retentionDays);
+                } else if (!res?.from) {
+                    // Older backend without range support: it ignored `from` and sent only
+                    // the newest 50. Fall back to the most it allows.
+                    res = await apiRequest(`${base}?limit=500`);
+                }
+            }
+            if (seq !== requestSeq.current) return;
             const list = Array.isArray(res) ? res : res?.telemetry || res?.items || [];
             
             if (silent) {
@@ -155,10 +200,12 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
                     const existingKeys = new Set(prev.map(p => p._id || p.ts || p.createdAt));
                     const freshPoints = list.filter((p: any) => !existingKeys.has(p._id || p.ts || p.createdAt));
                     if (freshPoints.length === 0) return prev;
-                    return [...prev, ...freshPoints];
+                    // Bound memory on long-open pages; chartData filters by time range anyway
+                    return [...prev, ...freshPoints].slice(-MAX_POINTS);
                 });
             } else {
                 setFetchedData(list);
+                setDownsampled(res?.downsampled === true);
             }
         } catch (e) {
             console.error("Failed to load telemetry data", e);
@@ -208,6 +255,7 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
 
     const numericKeys = useMemo(() => {
         const ignore = new Set(["__ms", "_id", "deviceId", "id", "device", "actuators"]);
+        if (downsampled) ignore.add("count"); // bucket size, not a sensor reading
         const keys = new Set<string>();
         for (const row of chartData) {
             for (const [k, v] of Object.entries(row)) {
@@ -216,7 +264,7 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
             }
         }
         return Array.from(keys).sort();
-    }, [chartData]);
+    }, [chartData, downsampled]);
 
     // Set defaults ONCE
     if (!didInitDefaults.current && numericKeys.length) {
@@ -318,7 +366,9 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
         });
     }
 
-    function GraphInner({ fullscreen = false }: { fullscreen?: boolean }) {
+    // Called as a plain function (not <GraphInner />): a component defined inside render is a
+    // new type every render, which remounted the whole chart on every 5s poll.
+    function renderGraph({ fullscreen = false }: { fullscreen?: boolean }) {
         const heightCls = fullscreen
             ? "h-[60vh] sm:h-[70vh] lg:h-[75vh]"
             : "h-[280px] sm:h-[360px] lg:h-[400px]";
@@ -328,28 +378,30 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
                 {/* Header Toolbar */}
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-100 dark:border-zinc-800/80 pb-3 shrink-0">
                     {/* Time Range Selector */}
-                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-                        <span className="text-xs font-bold text-zinc-400 mr-1 flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5" />
-                            Range:
-                        </span>
+                    <div className="flex items-center gap-2">
+                        <Clock className="hidden sm:block w-4 h-4 shrink-0 text-zinc-400" aria-hidden />
+                        <div role="radiogroup" aria-label="Time range" className="grid flex-1 grid-cols-6 gap-1 rounded-xl bg-zinc-100 p-1 sm:flex sm:flex-none dark:bg-zinc-800/80">
                         {TIME_RANGES.map((r) => (
                             <button
                                 key={r.value}
+                                type="button"
+                                role="radio"
+                                aria-checked={selectedRange === r.value}
                                 onClick={() => {
                                     setSelectedRange(r.value);
                                     resetZoom();
                                 }}
                                 className={cn(
-                                    "px-2.5 py-1 text-xs font-bold rounded-xl transition-all whitespace-nowrap",
+                                    "h-8 sm:px-3 text-xs font-semibold rounded-lg transition whitespace-nowrap",
                                     selectedRange === r.value
-                                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
-                                        : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/80 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                                        ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-950 dark:text-white"
+                                        : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
                                 )}
                             >
                                 {r.label}
                             </button>
                         ))}
+                        </div>
                     </div>
 
                     {/* Actions */}
@@ -392,7 +444,7 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
                 </div>
 
                 {/* Metric Field Chips */}
-                <div className="flex items-center gap-2 overflow-x-auto pb-1 shrink-0">
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 shrink-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     <span className="text-xs font-bold text-zinc-400 shrink-0 flex items-center gap-1">
                         <Layers className="w-3.5 h-3.5" />
                         Metrics:
@@ -404,16 +456,18 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
                         return (
                             <button
                                 key={k}
+                                type="button"
+                                aria-pressed={checked}
                                 onClick={() => toggleKey(k)}
                                 className={cn(
-                                    "text-xs px-3 py-1 rounded-full border flex items-center gap-2 transition font-bold whitespace-nowrap shrink-0",
+                                    "text-xs h-8 px-3 rounded-full border flex items-center gap-2 transition font-bold whitespace-nowrap shrink-0",
                                     checked
                                         ? "border-zinc-900 bg-zinc-900 text-white dark:border-white dark:bg-white dark:text-black shadow-sm"
                                         : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-700"
                                 )}
                             >
                                 <span className="inline-block h-2.5 w-2.5 rounded-full shadow-sm" style={{ background: stroke }} />
-                                {k}
+                                {humanizeKey(k)}
                             </button>
                         );
                     })}
@@ -423,7 +477,7 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
                             onClick={() => setSelectedKeys(numericKeys.slice(0, 2))}
                             className="text-xs px-2 py-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition font-bold shrink-0"
                         >
-                            Reset
+                            Default
                         </button>
                     )}
                 </div>
@@ -432,7 +486,7 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
                 <div className="flex-1 rounded-3xl border p-2 sm:p-4 border-zinc-100 bg-zinc-50/50 dark:border-zinc-800/50 dark:bg-zinc-900/20 backdrop-blur-sm flex flex-col min-h-0">
                     <div className={`w-full ${heightCls}`}>
                         {mounted ? (
-                            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 1, height: 1 }}>
                                 <AreaChart
                                     data={chartData}
                                     onMouseDown={(e: any) => {
@@ -509,6 +563,7 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
                                             key={k}
                                             type="monotone"
                                             dataKey={k}
+                                            name={humanizeKey(k)}
                                             stroke={colorForKey(k, numericKeys)}
                                             fill={`url(#color-${k})`}
                                             strokeWidth={2.5}
@@ -544,7 +599,12 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
                     </div>
 
                     <div className="mt-3 flex items-center justify-between text-[10px] text-zinc-400 font-mono px-2 shrink-0">
-                        <span>Range: {dataRangeText}</span>
+                        <span>
+                            Range: {dataRangeText}
+                            {retentionDays !== null && (selectedRange === "30d" || selectedRange === "all") && (
+                                <> · Data is kept {retentionDays} days</>
+                            )}
+                        </span>
                         <span>Drag on graph to zoom in</span>
                     </div>
                 </div>
@@ -582,7 +642,7 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
 
     return (
         <>
-            <GraphInner fullscreen={false} />
+            {renderGraph({ fullscreen: false })}
 
             {/* Fullscreen Portal - Mounts to document.body so it breaks out of parent container frames */}
             {open && mounted && createPortal(
@@ -594,7 +654,7 @@ export default function TelemetryGraph({ deviceId, history = [] }: TelemetryGrap
                         className="w-full max-w-7xl h-[92vh] rounded-[2.5rem] border border-white/15 bg-zinc-900/95 backdrop-blur-2xl shadow-2xl overflow-hidden ring-1 ring-white/10 p-4 sm:p-8 flex flex-col animate-in zoom-in-95 duration-200"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <GraphInner fullscreen />
+                        {renderGraph({ fullscreen: true })}
                     </div>
                 </div>,
                 document.body

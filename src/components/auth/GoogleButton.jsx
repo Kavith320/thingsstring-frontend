@@ -42,6 +42,7 @@ export default function GoogleButton({
 
                 setAuth({
                   token: data.token,
+                  userId: data.user?.id,
                   userId8: data.user?.userId8,
                 });
 

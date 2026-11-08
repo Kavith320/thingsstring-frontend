@@ -110,23 +110,24 @@ export default function AutomationPage() {
                 main > div { max-width: none !important; width: 100% !important; margin: 0 !important; }
             `}} />
 
-            <div className="relative h-[calc(100vh-120px)] sm:h-[calc(100vh-140px)] -mx-4 sm:-mx-6 lg:-mx-8 -mt-6 sm:-mt-8 flex flex-col overflow-hidden bg-white dark:bg-zinc-950 rounded-t-3xl border-x border-t border-zinc-200 dark:border-zinc-800 shadow-2xl">
+            <div className="relative h-[calc(100dvh-56px-16px)] sm:h-[calc(100dvh-64px-24px)] -mx-4 sm:-mx-6 lg:-mx-8 -mt-4 sm:-mt-6 flex flex-col overflow-hidden bg-white dark:bg-zinc-950 rounded-t-3xl border-x border-t border-zinc-200 dark:border-zinc-800 shadow-2xl">
                 {/* Designer Header */}
-                <div className="h-[56px] border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-6 bg-white/50 dark:bg-zinc-950/50 backdrop-blur-md shrink-0">
-                    <div className="flex items-center gap-4">
-                        <div className="p-2 rounded-xl bg-indigo-500 text-white shadow-lg shadow-indigo-500/20">
+                <div className="h-[56px] border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3 px-4 sm:px-6 bg-white/50 dark:bg-zinc-950/50 backdrop-blur-md shrink-0">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <div className="shrink-0 p-2 rounded-xl bg-indigo-500 text-white shadow-lg shadow-indigo-500/20">
                             <Zap className="w-5 h-5" />
                         </div>
-                        <div>
-                            <h1 className="text-lg font-black tracking-tight dark:text-white line-height-none">Automation Designer</h1>
-                            <div className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest leading-none mt-0.5">Visual Flow Engine v2.0</div>
+                        <div className="min-w-0">
+                            <h2 className="text-base sm:text-lg font-black tracking-tight dark:text-white leading-tight truncate">Automation Designer</h2>
+                            <div className="hidden sm:block text-xs font-medium text-zinc-500 leading-none mt-0.5">Connect a sensor, a condition and an actuator</div>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-black text-emerald-600 dark:text-emerald-400">
+                        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-bold text-emerald-600 dark:text-emerald-400">
                             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            ENGINE ONLINE
+                            <span className="hidden sm:inline">Engine online</span>
+                            <span className="sm:hidden">Online</span>
                         </div>
                     </div>
                 </div>

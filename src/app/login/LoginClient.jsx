@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Script from "next/script";
 import dynamic from "next/dynamic";
-import { Mail, Lock, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, User } from "lucide-react";
 
 import { apiRequest } from "../../lib/api";
 import { setAuth } from "@/lib/auth/storage";
@@ -24,17 +24,31 @@ export default function LoginClient() {
     if (p) setNextPath(p);
   }, []);
 
+  const [mode, setMode] = useState("login"); // "login" | "register"
+  const isRegister = mode === "register";
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  async function handleLogin(e) {
+  function switchMode(next) {
+    setMode(next);
+    setError("");
+  }
+
+  async function handleSubmit(e) {
     e.preventDefault();
     const cleanEmail = email.trim();
-    if (!cleanEmail || !password) {
-      setError("Please enter both email and password.");
+    const cleanName = name.trim();
+    if (!cleanEmail || !password || (isRegister && !cleanName)) {
+      setError(isRegister ? "Please enter your name, email and password." : "Please enter both email and password.");
+      return;
+    }
+    // Same limits as the backend (auth.controller.js)
+    if (isRegister && (password.length < 8 || password.length > 128)) {
+      setError("Password must be 8 to 128 characters.");
       return;
     }
 
@@ -42,19 +56,24 @@ export default function LoginClient() {
     setError("");
 
     try {
-      const data = await apiRequest("/api/auth/login", {
-        method: "POST",
-        body: { email: cleanEmail, password },
-      });
+      const data = isRegister
+        ? await apiRequest("/api/auth/register", {
+            method: "POST",
+            body: { name: cleanName, email: cleanEmail, password },
+          })
+        : await apiRequest("/api/auth/login", {
+            method: "POST",
+            body: { email: cleanEmail, password },
+          });
 
       setAuth({
         token: data.token,
-        userId: data.user?._id,
+        userId: data.user?.id || data.user?._id,
         userId8: data.user?.userId8
       });
       router.push(nextPath);
     } catch (err) {
-      setError(err.message || "Login failed");
+      setError(err.message || (isRegister ? "Registration failed" : "Login failed"));
     } finally {
       setLoading(false);
     }
@@ -82,18 +101,40 @@ export default function LoginClient() {
               ThingsString
             </h1>
             <p className="mt-1 text-xs sm:text-sm text-gray-400">
-              Sign in to manage your IoT devices
+              {isRegister ? "Create an account to manage your IoT devices" : "Sign in to manage your IoT devices"}
             </p>
           </div>
 
           {/* Card */}
           <form
-            onSubmit={handleLogin}
+            onSubmit={handleSubmit}
             className="rounded-3xl border border-white/15 bg-white/[0.06] p-5 sm:p-7 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-2xl"
           >
             {error && (
               <div className="mb-4 rounded-2xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs sm:text-sm text-red-200">
                 {error}
+              </div>
+            )}
+
+            {/* Name (register only) */}
+            {isRegister && (
+              <div className="mb-4">
+                <label className="block text-xs sm:text-sm font-medium text-gray-200">
+                  Name
+                </label>
+                <div className="mt-2 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/35 px-4 py-2.5 focus-within:ring-2 focus-within:ring-white/10">
+                  <User className="h-4 w-4 text-gray-400 shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="Your name"
+                    autoComplete="name"
+                    maxLength={100}
+                    className="w-full bg-transparent text-sm sm:text-base text-white placeholder:text-gray-500 outline-none"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                  />
+                </div>
               </div>
             )}
 
@@ -106,6 +147,7 @@ export default function LoginClient() {
               <input
                 type="email"
                 placeholder="you@example.com"
+                autoComplete="email"
                 className="w-full bg-transparent text-sm sm:text-base text-white placeholder:text-gray-500 outline-none"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -123,7 +165,8 @@ export default function LoginClient() {
                 <Lock className="h-4 w-4 text-gray-400 shrink-0" />
                 <input
                   type={showPw ? "text" : "password"}
-                  placeholder="••••••••"
+                  placeholder={isRegister ? "At least 8 characters" : "••••••••"}
+                  autoComplete={isRegister ? "new-password" : "current-password"}
                   className="w-full bg-transparent text-sm sm:text-base text-white placeholder:text-gray-500 outline-none"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -149,8 +192,21 @@ export default function LoginClient() {
               disabled={loading}
               className="mt-6 w-full rounded-2xl bg-white py-2.5 sm:py-3 text-sm sm:text-base font-semibold text-black shadow-lg shadow-white/10 transition hover:bg-white/95 active:scale-[0.99] disabled:opacity-60"
             >
-              {loading ? "Signing in..." : "Sign in"}
+              {loading
+                ? (isRegister ? "Creating account..." : "Signing in...")
+                : (isRegister ? "Create account" : "Sign in")}
             </button>
+
+            <p className="mt-4 text-center text-xs sm:text-sm text-gray-400">
+              {isRegister ? "Already have an account?" : "New to ThingsString?"}{" "}
+              <button
+                type="button"
+                onClick={() => switchMode(isRegister ? "login" : "register")}
+                className="font-semibold text-white hover:underline"
+              >
+                {isRegister ? "Sign in" : "Create an account"}
+              </button>
+            </p>
 
             {/* Divider */}
             <div className="my-5 flex items-center gap-3">

@@ -544,13 +544,14 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                     />
                     <Controls className="!m-4 !bg-white dark:!bg-zinc-900 !border-zinc-200 dark:!border-zinc-800 rounded-2xl shadow-xl" />
 
-                    <Panel position="top-right" className="m-4 flex gap-3">
+                    <Panel position="top-right" className="!m-3 sm:!m-4 flex gap-2 sm:gap-3">
                         <button
                             onClick={clearCanvas}
-                            className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all flex items-center gap-2 font-bold text-xs"
+                            aria-label="Clear canvas"
+                            className="h-10 px-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all flex items-center gap-2 font-bold text-xs"
                         >
                             <Trash2 className="w-4 h-4" />
-                            Clear
+                            <span className="hidden sm:inline">Clear</span>
                         </button>
                         <button
                             onClick={() => {
@@ -561,22 +562,24 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                                     setTimeout(() => setDeployStatus(null), 3000);
                                 }
                             }}
-                            className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all flex items-center gap-2 font-bold text-xs"
+                            aria-label="Execution history"
+                            className="h-10 px-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all flex items-center gap-2 font-bold text-xs"
                         >
                             <History className="w-4 h-4 text-indigo-500" />
-                            History
+                            <span className="hidden sm:inline">History</span>
                         </button>
                         <button
                             onClick={handleSave}
                             disabled={saving}
-                            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl shadow-xl shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-2 font-bold text-sm"
+                            className="h-10 px-4 sm:px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-2 font-bold text-sm whitespace-nowrap"
                         >
                             {saving ? (
                                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                             ) : (
                                 <Save className="w-4 h-4" />
                             )}
-                            Deploy Flows
+                            <span className="sm:hidden">Deploy</span>
+                            <span className="hidden sm:inline">Deploy Flows</span>
                         </button>
                     </Panel>
 

@@ -4,11 +4,13 @@ import { useState } from "react";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
 import GlobalAiCopilot from "@/components/common/GlobalAiCopilot";
+import ProtectedClient from "@/components/common/ProtectedClient";
 
 export default function DashboardLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
+    <ProtectedClient>
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <div className="flex min-h-screen relative">
         {/* Desktop sidebar */}
@@ -45,5 +47,6 @@ export default function DashboardLayout({ children }) {
       {/* Global AI Copilot Agent across all dashboard pages */}
       <GlobalAiCopilot />
     </div>
+    </ProtectedClient>
   );
 }

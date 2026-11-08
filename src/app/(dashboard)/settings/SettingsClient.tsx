@@ -71,7 +71,7 @@ export default function SettingsClient() {
         <div className="space-y-6 max-w-5xl mx-auto pb-12 animate-in fade-in duration-500">
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
-                    <h1 className="text-4xl font-black tracking-tight text-zinc-900 dark:text-zinc-100 italic">Settings</h1>
+                    <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">Settings</h2>
                     <p className="text-zinc-500 dark:text-zinc-400 mt-2 font-medium">
                         Configure your ThingsString workspace and personal preferences.
                     </p>
@@ -93,7 +93,7 @@ export default function SettingsClient() {
 
             <div className="space-y-8 mt-8">
                 {/* Horizontal Tabs at the top */}
-                <div className="flex items-center gap-1 p-1 bg-zinc-100/50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-fit overflow-x-auto scrollbar-hide">
+                <div role="tablist" className="grid grid-cols-2 gap-1 p-1 sm:flex sm:w-fit sm:max-w-full sm:overflow-x-auto bg-zinc-100/50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
                     {TABS.map((tab) => {
                         const Icon = tab.icon;
                         const active = activeTab === tab.id;
@@ -101,8 +101,10 @@ export default function SettingsClient() {
                             <button
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
+                                role="tab"
+                                aria-selected={active}
                                 className={cn(
-                                    "flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 shrink-0",
+                                    "flex min-h-11 items-center justify-center sm:justify-start gap-2 px-3 sm:px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors shrink-0",
                                     active
                                         ? "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-700"
                                         : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
@@ -116,7 +118,7 @@ export default function SettingsClient() {
                 </div>
 
                 {/* Content Area */}
-                <div className="bg-white/50 dark:bg-zinc-900/30 border border-zinc-200 dark:border-zinc-800 rounded-[2.5rem] p-6 md:p-10 shadow-sm backdrop-blur-xl min-h-[500px]">
+                <div className="bg-white/50 dark:bg-zinc-900/30 border border-zinc-200 dark:border-zinc-800 rounded-2xl sm:rounded-3xl p-5 md:p-10 shadow-sm">
 
                     {/* Profile Tab */}
                     {activeTab === "profile" && (

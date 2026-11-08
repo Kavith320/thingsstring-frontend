@@ -7,6 +7,8 @@ import { getToken } from "@/lib/auth";
 import {
     cronToUi,
     uiToCron,
+    describeCron,
+    formatDuration,
     type ScheduleUiState,
     type ScheduleType,
 } from "@/lib/schedule-utils";
@@ -321,7 +323,6 @@ export default function DeviceSchedulesPage() {
 
                 {schedules.map((s) => {
                     const id = s._id || s.id || "";
-                    const friendly = cronToUi(s.cron);
 
                     return (
                         <div
@@ -338,12 +339,9 @@ export default function DeviceSchedulesPage() {
                                         {!s.enabled && <span className="text-xs bg-zinc-200 dark:bg-zinc-800 px-2 py-0.5 rounded-full text-zinc-500">Disabled</span>}
                                     </div>
                                     <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                                        {friendly.type === 'daily' && `Daily at ${friendly.time}`}
-                                        {friendly.type === 'every_hour' && `Every ${friendly.intervalValue} hr(s)`}
-                                        {friendly.type === 'every_minute' && `Every ${friendly.intervalValue} min(s)`}
-                                        {friendly.type === 'every_second' && `Every ${friendly.intervalValue} sec(s)`}
-                                        <span className="mx-2">•</span>
-                                        {s.duration_sec > 0 ? `Runs for ${s.duration_sec}s` : "No duration"}
+                                        {describeCron(s.cron)}
+                                        <span className="mx-2" aria-hidden>·</span>
+                                        {s.duration_sec > 0 ? `Runs for ${formatDuration(s.duration_sec)}` : "No end time"}
                                     </div>
 
                                     <div className="mt-2 flex flex-wrap gap-2">
@@ -405,11 +403,12 @@ export default function DeviceSchedulesPage() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="md:col-span-2">
                                         <label className="mb-1 block text-xs font-medium text-zinc-500">Frequency</label>
-                                        <div className="flex flex-wrap gap-2">
+                                        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
                                             {(["daily", "every_hour", "every_minute", "every_second"] as const).map(t => (
-                                                <button key={t} onClick={() => setUiState({ ...uiState, type: t })}
+                                                <button key={t} type="button" onClick={() => setUiState({ ...uiState, type: t })}
+                                                    aria-pressed={uiState.type === t}
                                                     className={cn(
-                                                        "px-3 py-1.5 rounded-lg text-sm border transition",
+                                                        "h-10 px-3 rounded-lg text-sm border transition",
                                                         uiState.type === t
                                                             ? "bg-zinc-900 text-white border-zinc-900 dark:bg-white dark:text-black dark:border-white"
                                                             : "bg-white text-zinc-600 border-zinc-200 hover:border-zinc-300 dark:bg-zinc-900 dark:text-zinc-400 dark:border-zinc-800"
@@ -424,7 +423,15 @@ export default function DeviceSchedulesPage() {
                                         </div>
                                     </div>
 
+                                    {uiState.type === 'custom' && (
+                                        <div className="md:col-span-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
+                                            This schedule uses a custom timing (<code className="font-mono">{uiState.cron}</code>) that this form can&apos;t edit.
+                                            It will be kept as it is unless you pick one of the options above.
+                                        </div>
+                                    )}
+
                                     {uiState.type === 'daily' && (
+                                        <>
                                         <div>
                                             <label className="mb-1 block text-xs font-medium text-zinc-500">At Time</label>
                                             <Input
@@ -433,6 +440,21 @@ export default function DeviceSchedulesPage() {
                                                 onChange={(e) => setUiState({ ...uiState, time: e.target.value })}
                                             />
                                         </div>
+                                        <div>
+                                            <label className="mb-1 block text-xs font-medium text-zinc-500">On</label>
+                                            <Select
+                                                value={uiState.dow || "*"}
+                                                onChange={(e) => setUiState({ ...uiState, dow: e.target.value })}
+                                            >
+                                                <option value="*">Every day</option>
+                                                <option value="1-5">Weekdays (Mon–Fri)</option>
+                                                <option value="0,6">Weekends (Sat, Sun)</option>
+                                                {uiState.dow && !["*", "1-5", "0,6"].includes(uiState.dow) && (
+                                                    <option value={uiState.dow}>{describeCron(`0 0 0 * * ${uiState.dow}`).replace(/ at .*/, "")}</option>
+                                                )}
+                                            </Select>
+                                        </div>
+                                        </>
                                     )}
 
                                     {uiState.type === 'every_hour' && (

@@ -1,8 +1,10 @@
-export type ScheduleType = "every_second" | "every_minute" | "every_hour" | "daily";
+// "custom" = a cron this form can't edit (e.g. made elsewhere). It is kept unchanged on save.
+export type ScheduleType = "every_second" | "every_minute" | "every_hour" | "daily" | "custom";
 
 export interface ScheduleUiState {
     type: ScheduleType;
     time: string; // HH:MM for daily
+    dow?: string; // day-of-week field for daily ("*" = every day, "1-5" = weekdays, ...)
     intervalValue: number; // for second, minute, hour
     cron: string; // internal storage
 }
@@ -36,8 +38,10 @@ export function uiToCron(state: ScheduleUiState): string {
     if (state.type === "daily") {
         const [h, m] = state.time.split(":").map(Number);
         // "0 30 08 * * *"
-        return `0 ${m || 0} ${h || 0} * * *`;
+        return `0 ${m || 0} ${h || 0} * * ${state.dow || "*"}`;
     }
+
+    if (state.type === "custom") return state.cron;
 
     return state.cron;
 }
@@ -54,19 +58,20 @@ export function cronToUi(cronInput: string): ScheduleUiState {
     const fields = parts.length === 5 ? ["0", ...parts] : parts;
     const [sec, min, hour, day, month, dow] = fields;
 
-    // 1. Daily: "0 30 08 * * *"
-    // Checks: sec=0, min/hour fixed, rest *
+    if (fields.length !== 6) return { type: "custom", time: "00:00", intervalValue: 1, cron };
+
+    // 1. Daily: "0 30 08 * * *", optionally on some weekdays ("0 30 18 * * 1-5")
     if (
         sec === "0" &&
-        !min.includes("*") && !min.includes("/") &&
-        !hour.includes("*") && !hour.includes("/") &&
-        day === "*" && month === "*" && dow === "*"
+        /^\d{1,2}$/.test(min) && /^\d{1,2}$/.test(hour) &&
+        day === "*" && month === "*" && /^(\*|[0-7](-[0-7])?(,[0-7](-[0-7])?)*)$/.test(dow)
     ) {
         const h = hour.padStart(2, "0");
         const m = min.padStart(2, "0");
         return {
             type: "daily",
             time: `${h}:${m}`,
+            dow,
             intervalValue: 1,
             cron,
         };
@@ -113,16 +118,53 @@ export function cronToUi(cronInput: string): ScheduleUiState {
         }
     }
 
-    // Fallback: Default to daily if unrecognizable, or maybe just return a custom-like state wrapped in daily?
-    // Since we removed "custom" from UI, we have to map it to SOMETHING. 
-    // Let's map to Daily at 00:00 as a fallback but keep the cron string if re-saved?
-    // Actually, user said "no need advanced", so imperfect mapping is acceptable, 
-    // but let's try to preserve standard daily.
+    // Anything else is shown and saved as-is instead of being silently rewritten
+    return { type: "custom", time: "00:00", intervalValue: 1, cron };
+}
 
-    return {
-        type: "daily",
-        time: "08:00",
-        intervalValue: 1,
-        cron,
-    };
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function describeDays(dow: string | undefined): string {
+    if (!dow || dow === "*") return "Every day";
+    if (dow === "1-5") return "Weekdays";
+    if (dow === "0,6" || dow === "6,0" || dow === "6-7") return "Weekends";
+    return dow
+        .split(",")
+        .map((part) => {
+            const [a, b] = part.split("-").map(Number);
+            return b === undefined ? DAY_NAMES[a] : `${DAY_NAMES[a]}–${DAY_NAMES[b]}`;
+        })
+        .join(", ");
+}
+
+/** Human description of a schedule's timing, e.g. "Weekdays at 18:30". */
+export function describeCron(cron: string): string {
+    const ui = cronToUi(cron);
+    const n = ui.intervalValue;
+    switch (ui.type) {
+        case "daily":
+            return `${describeDays(ui.dow)} at ${ui.time}`;
+        case "every_hour":
+            return n === 1 ? "Every hour" : `Every ${n} hours`;
+        case "every_minute":
+            return n === 1 ? "Every minute" : `Every ${n} minutes`;
+        case "every_second":
+            return n === 1 ? "Every second" : `Every ${n} seconds`;
+        default:
+            return `Custom timing (${cron})`;
+    }
+}
+
+/** 900 -> "15 min", 5400 -> "1 h 30 min", 45 -> "45 s". */
+export function formatDuration(sec: number): string {
+    const s = Math.max(0, Math.round(sec || 0));
+    if (s < 60) return `${s} s`;
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const rest = s % 60;
+    const parts = [];
+    if (h) parts.push(`${h} h`);
+    if (m) parts.push(`${m} min`);
+    if (!h && rest) parts.push(`${rest} s`);
+    return parts.join(" ");
 }

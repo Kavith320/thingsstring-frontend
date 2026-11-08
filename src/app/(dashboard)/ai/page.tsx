@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { apiRequest } from "@/lib/api";
 import { Bot, Sparkles, Send, BrainCircuit, Activity, Cpu, Mic, MicOff } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, manualControlBlockReason, isOnlineFromLastTelemetry } from "@/lib/utils";
 
 /* -------- Types -------- */
 interface ChatMessage {
@@ -107,10 +107,7 @@ export default function AiPage() {
 
                 list.forEach((d: any) => {
                     const lastTelem = d.last_telemetry || {};
-                    const ts = lastTelem.updatedAt || lastTelem.ts || lastTelem.timestamp || lastTelem.created_at || 0;
-                    const lastSeen = ts ? new Date(ts).getTime() : 0;
-
-                    if (Date.now() - lastSeen < 300000) online++;
+                    if (isOnlineFromLastTelemetry(lastTelem)) online++;
 
                     for (const k in lastTelem) {
                         const v = lastTelem[k];
@@ -219,6 +216,11 @@ export default function AiPage() {
                 setMessages(prev => [...prev, { role: "assistant", content: data.message }]);
                 if (data.action?.type === "CONTROL") {
                     const { deviceId, actuatorKey, state } = data.action;
+                    const blocked = manualControlBlockReason(fullContext?.devices || [], deviceId, actuatorKey);
+                    if (blocked) {
+                        setMessages(prev => [...prev, { role: "assistant", content: `⚠️ Not executed: ${blocked}` }]);
+                        return;
+                    }
                     setMessages(prev => [...prev, {
                         role: "assistant",
                         content: `⚡ *Executing command:* Turning **${actuatorKey}** to **${state}** on device \`${deviceId}\`...`
@@ -247,48 +249,30 @@ export default function AiPage() {
     }
 
     return (
-        <div className="h-full sm:h-[calc(100vh-8rem)] flex flex-col gap-4 sm:gap-6">
+        <div className="h-[calc(100dvh-56px-32px)] sm:h-[calc(100dvh-64px-48px)] flex flex-col gap-3 sm:gap-5">
 
-            {/* Top: System Summary Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                <div className="relative overflow-hidden group rounded-3xl border border-zinc-200 bg-gradient-to-br from-white to-zinc-50 p-4 sm:p-6 dark:border-zinc-800 dark:from-zinc-900 dark:to-zinc-950/50 shadow-sm">
-                    <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                        <Activity className="w-16 h-16 sm:w-24 sm:h-24" />
+            {/* Top: System Summary */}
+            <div className="grid grid-cols-3 gap-2 sm:gap-4 shrink-0">
+                {[
+                    { label: "Actuators on", value: metrics ? `${metrics.activeActuators}/${metrics.totalActuators}` : "–", icon: Activity },
+                    { label: "Sensors", value: metrics ? metrics.totalSensors : "–", sub: metrics ? `${metrics.onlineDevices} device${metrics.onlineDevices === 1 ? "" : "s"} online` : "", icon: Cpu },
+                    { label: "Assistant", value: "Ready", icon: BrainCircuit, green: true },
+                ].map((c) => (
+                    <div key={c.label} className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-3 sm:p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
+                        <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-500">
+                            <c.icon className="hidden sm:block h-4 w-4" aria-hidden />
+                            <span className="truncate">{c.label}</span>
+                        </div>
+                        <div className={cn("mt-1 truncate text-lg sm:text-2xl font-bold", c.green ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-900 dark:text-white")}>
+                            {c.value}
+                        </div>
+                        {c.sub && <div className="hidden sm:block mt-0.5 truncate text-xs text-zinc-500">{c.sub}</div>}
                     </div>
-                    <div className="text-[10px] sm:text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">Actuators</div>
-                    <div className="text-xl sm:text-3xl font-bold text-zinc-900 dark:text-white">
-                        {metrics ? `${metrics.activeActuators} / ${metrics.totalActuators}` : "--"}
-                    </div>
-                    <div className="text-[10px] sm:text-xs text-zinc-400 mt-1 sm:mt-2">Active / Total</div>
-                </div>
-
-                <div className="relative overflow-hidden group rounded-3xl border border-zinc-200 bg-gradient-to-br from-white to-zinc-50 p-4 sm:p-6 dark:border-zinc-800 dark:from-zinc-900 dark:to-zinc-950/50 shadow-sm">
-                    <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                        <Cpu className="w-16 h-16 sm:w-24 sm:h-24" />
-                    </div>
-                    <div className="text-[10px] sm:text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">Realtime Sensors</div>
-                    <div className="text-xl sm:text-3xl font-bold text-zinc-900 dark:text-white">
-                        {metrics ? metrics.totalSensors : "--"}
-                    </div>
-                    <div className="text-[10px] sm:text-xs text-zinc-400 mt-1 sm:mt-2">
-                        {metrics ? metrics.onlineDevices : "--"} active devices
-                    </div>
-                </div>
-
-                <div className="relative overflow-hidden group rounded-3xl border border-zinc-200 bg-gradient-to-br from-white to-zinc-50 p-4 sm:p-6 dark:border-zinc-800 dark:from-zinc-900 dark:to-zinc-950/50 shadow-sm col-span-1 sm:col-span-2 lg:col-span-1">
-                    <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                        <BrainCircuit className="w-16 h-16 sm:w-24 sm:h-24" />
-                    </div>
-                    <div className="text-[10px] sm:text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">AI Status</div>
-                    <div className="text-xl sm:text-3xl font-bold text-emerald-500 flex items-center gap-2">
-                        Active <span className="relative flex h-2 w-2 sm:h-3 sm:w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 sm:h-3 sm:w-3 bg-emerald-500"></span></span>
-                    </div>
-                    <div className="text-[10px] sm:text-xs text-zinc-400 mt-1 sm:mt-2">Hybrid Enabled</div>
-                </div>
+                ))}
             </div>
 
             {/* Bottom: Chat Interface */}
-            <div className="flex-1 min-h-[400px] rounded-3xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/60 shadow-xl flex flex-col overflow-hidden">
+            <div className="flex-1 min-h-0 rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/60 shadow-sm flex flex-col overflow-hidden">
                 {/* Header */}
                 <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-3 bg-zinc-50/50 dark:bg-zinc-900/50">
                     <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
@@ -304,14 +288,17 @@ export default function AiPage() {
                     {messages.map((m, i) => (
                         <div key={i} className={cn("flex w-full", m.role === "user" ? "justify-end" : "justify-start")}>
                             <div className={cn(
-                                "max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm leading-relaxed",
+                                "max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 py-2 sm:px-4 sm:py-3 text-sm leading-relaxed break-words",
                                 m.role === "user"
                                     ? "bg-zinc-900 text-white rounded-br-sm dark:bg-white dark:text-black shadow-md"
                                     : "bg-zinc-100 text-zinc-800 rounded-bl-sm dark:bg-zinc-800/80 dark:text-zinc-200"
                             )}>
-                                {/* Render markdown-like bolding */}
+                                {/* **bold** as React elements. Never inject the text as HTML: replies
+                                    contain device names/data that come from the devices themselves. */}
                                 {m.content.split("\n").map((line, li) => (
-                                    <p key={li} className="mb-1 last:mb-0" dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') }} />
+                                    <p key={li} className="mb-1 last:mb-0">
+                                        {line.split(/\*\*(.*?)\*\*/g).map((part, pi) => (pi % 2 ? <b key={pi}>{part}</b> : part))}
+                                    </p>
                                 ))}
                             </div>
                         </div>

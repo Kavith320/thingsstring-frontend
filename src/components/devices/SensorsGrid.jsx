@@ -32,6 +32,7 @@ import {
   FlaskConical,
 
 } from "lucide-react";
+import { humanizeKey } from "@/lib/utils";
 
 /* ------------------ ALWAYS IGNORE THESE KEYS ------------------ */
 const IGNORE_KEYS = new Set([
@@ -261,12 +262,6 @@ function normalizeKey(k) {
     .replace(/[^a-z0-9_]/g, "");
 }
 
-function titleizeKey(k) {
-  const s = String(k || "").replace(/_/g, " ").trim();
-  if (!s) return "-";
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
 function pickSensorMeta(key) {
   const nk = normalizeKey(key);
 
@@ -387,45 +382,35 @@ export default function SensorsGrid({ lastTelemetry }) {
   }
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3">
       {entries.map(([k, v]) => {
         const meta = pickSensorMeta(k);
         const Icon = meta.icon || Eye;
         const valueText = formatValue(v);
-        const label = titleizeKey(k);
+        const label = humanizeKey(k);
         const accent = toneClasses(meta.tone);
 
         return (
           <div
             key={k}
-            className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/35"
+            title={`${label} (key: ${normalizeKey(k)})`}
+            className="min-w-0 rounded-xl border border-zinc-200 bg-white p-3 sm:p-4 dark:border-zinc-800 dark:bg-zinc-950/30"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                  {label}
-                </div>
-                <div className="mt-2 text-lg font-semibold text-zinc-900 dark:text-zinc-100 break-words">
-                  {valueText}
-                  {meta.unit && typeof v === "number" ? (
-                    <span className="ml-1 text-sm font-medium text-zinc-500 dark:text-zinc-400">
-                      {meta.unit}
-                    </span>
-                  ) : null}
-                </div>
+            <div className="flex items-center gap-2">
+              <div className={`shrink-0 rounded-lg border p-1.5 ${accent}`}>
+                <Icon className="h-4 w-4" />
               </div>
-
-              <div
-                className={`shrink-0 rounded-2xl border p-2 ${accent}`}
-                title={label}
-              >
-                <Icon className="h-5 w-5" />
+              <div className="min-w-0 text-xs font-medium leading-tight text-zinc-500 dark:text-zinc-400 line-clamp-2 break-words">
+                {label}
               </div>
             </div>
-
-            {/* small hint row (optional) */}
-            <div className="mt-3 text-[11px] text-zinc-500 dark:text-zinc-400 break-all">
-              key: <span className="font-mono">{normalizeKey(k)}</span>
+            <div className="mt-2.5 truncate whitespace-nowrap text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+              {valueText}
+              {meta.unit && typeof v === "number" ? (
+                <span className="ml-1 text-sm font-medium text-zinc-500 dark:text-zinc-400">
+                  {meta.unit}
+                </span>
+              ) : null}
             </div>
           </div>
         );

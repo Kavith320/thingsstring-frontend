@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import StatusPill from "@/components/common/StatusPill";
 import { apiRequest } from "@/lib/api";
 import {
     getLastTelemetryMs,
@@ -8,7 +10,7 @@ import {
     formatLastSeen,
 } from "@/lib/utils";
 import { getUser } from "@/lib/auth";
-import { Copy, Check, Info, Plus, X, Search } from "lucide-react";
+import { Copy, Check, Plus, X, ChevronRight } from "lucide-react";
 import LoadingSignal from "@/components/LoadingSignal";
 
 /* -------- Types -------- */
@@ -46,25 +48,6 @@ interface DeviceRow {
 }
 
 /* -------- UI Components -------- */
-function StatusBadge({ online }: { online: boolean }) {
-    return (
-        <span
-            className={[
-                "text-xs px-2 py-1 rounded-full border whitespace-nowrap",
-                online
-                    ? "bg-green-500/10 border-green-500/30 text-green-600 dark:text-green-400"
-                    : "bg-zinc-500/10 border-zinc-500/30 text-zinc-700 dark:text-zinc-200",
-            ].join(" ")}
-        >
-            {online ? "ONLINE" : "OFFLINE"}
-        </span>
-    );
-}
-
-
-
-
-
 export default function DevicesClient({
     initialDevices,
 }: {
@@ -89,34 +72,30 @@ export default function DevicesClient({
         setTimeout(() => setCopied(false), 2000);
     };
 
-    async function loadDevices() {
-        // Only show loading on manual refresh or initial if empty. 
-        // Background polling shouldn't trigger full loading state to avoid flickering.
-        // However, to keep it simple and consistent with original logic, we can keep it or refine it.
-        // Let's refine: don't set loading true for background polling.
-        setError("");
+    // Background polls fail silently (they retry on the next tick and the list keeps the
+    // last good data); only a manual refresh reports its error.
+    async function loadDevices({ reportErrors = false } = {}) {
         try {
             const data = await apiRequest("/api/devices", { method: "GET" });
             const list = Array.isArray(data) ? data : data?.devices || [];
             setDevices(list);
+            setError("");
         } catch (e: any) {
             console.error(e);
-            // Don't show error UI for background polling failures to avoid disrupting user
+            if (reportErrors) setError(e.message || "Failed to load devices");
         }
     }
 
     // Manual refresh with loading state
     async function handleRefresh() {
         setLoading(true);
-        await loadDevices().catch((e: any) => setError(e.message || "Failed"));
+        await loadDevices({ reportErrors: true });
         setLoading(false);
     }
 
     useEffect(() => {
-        // Refresh immediately on mount to clear stale server-side data
         loadDevices();
-        // Start frequent polling (3s)
-        const id = setInterval(loadDevices, 3_000);
+        const id = setInterval(loadDevices, 5_000);
         return () => clearInterval(id);
     }, []);
 
@@ -130,7 +109,7 @@ export default function DevicesClient({
                 id ||
                 "Unnamed device";
 
-            const online = isOnlineFromLastTelemetry(d?.last_telemetry, 60_000);
+            const online = isOnlineFromLastTelemetry(d?.last_telemetry);
             const lastSeenMs = getLastTelemetryMs(d?.last_telemetry);
 
             return {
@@ -153,9 +132,9 @@ export default function DevicesClient({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div className="flex items-center gap-4">
                     <div className="min-w-0">
-                        <h2 className="text-xl sm:text-2xl font-semibold">Devices</h2>
+                        <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-white">Devices</h2>
                         <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                            Offline if last telemetry older than 60 seconds
+                            A device shows as offline after 5 minutes without data
                         </p>
                     </div>
                     {loading && <LoadingSignal size="sm" />}
@@ -163,7 +142,7 @@ export default function DevicesClient({
 
                 <button
                     onClick={() => setShowAddDevice(!showAddDevice)}
-                    className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl bg-zinc-900 text-white px-4 py-2 text-sm hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 transition-colors shadow-sm"
+                    className="w-full sm:w-auto flex h-11 items-center justify-center gap-2 rounded-xl bg-zinc-900 text-white px-4 text-sm font-semibold hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 transition-colors shadow-sm"
                 >
                     <Plus className="w-4 h-4" />
                     Add Device
@@ -179,11 +158,12 @@ export default function DevicesClient({
                     />
 
                     {/* Modal CONTENT */}
-                    <div className="relative w-full max-w-2xl transform overflow-hidden rounded-[2.5rem] border border-white/20 bg-white/90 p-6 sm:p-10 shadow-2xl backdrop-blur-2xl dark:border-zinc-800/50 dark:bg-zinc-950/90 transition-all animate-in fade-in zoom-in-95 duration-300">
+                    <div className="relative w-full max-w-2xl transform overflow-hidden rounded-3xl border border-white/20 bg-white p-5 sm:p-10 shadow-2xl backdrop-blur-2xl dark:border-zinc-800/50 dark:bg-zinc-950/90 transition-all animate-in fade-in zoom-in-95 duration-300">
                         {/* Close Button */}
                         <button
                             onClick={() => setShowAddDevice(false)}
-                            className="absolute right-6 top-6 p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400"
+                            aria-label="Close"
+                            className="absolute right-4 top-4 sm:right-6 sm:top-6 p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-400"
                         >
                             <X className="w-5 h-5" />
                         </button>
@@ -255,48 +235,39 @@ export default function DevicesClient({
             )}
 
             {error && (
-                <div className="rounded-2xl border p-4 border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300">
+                <div role="status" className="rounded-xl border px-4 py-3 text-sm border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300">
                     {error}
                 </div>
             )}
 
             {/* Empty state */}
             {!loading && !error && rows.length === 0 && (
-                <div className="rounded-2xl border p-6 border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/60">
-                    No devices found.
+                <div className="rounded-2xl border border-dashed p-8 text-center border-zinc-300 dark:border-zinc-700">
+                    <p className="font-semibold text-zinc-900 dark:text-white">No devices yet</p>
+                    <p className="mt-1 text-sm text-zinc-500">Tap <b>Add Device</b> above to see how to connect one.</p>
                 </div>
             )}
 
             {/* Device cards */}
-            {!error && rows.length > 0 && (
-                <div className="grid gap-3">
+            {rows.length > 0 && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                     {rows.map((r) => (
-                        <div
+                        <Link
                             key={r.id}
-                            className="rounded-2xl border p-4 border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/60"
+                            href={`/devices/${encodeURIComponent(r.id)}`}
+                            className="group flex min-w-0 items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 transition hover:border-zinc-300 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-zinc-800 dark:bg-zinc-900/40 dark:hover:border-zinc-700"
                         >
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                <div className="min-w-0">
-                                    <div className="font-semibold truncate">{r.name}</div>
-                                    <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 break-all">
-                                        ID: {r.id}
-                                        {r.lastSeenMs ? (
-                                            <> • Last: {formatLastSeen(r.lastSeenMs)}</>
-                                        ) : null}
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center justify-between sm:justify-end gap-3">
-                                    <StatusBadge online={r.online} />
-                                    <a
-                                        href={`/devices/${encodeURIComponent(r.id)}`}
-                                        className="inline-flex items-center justify-center rounded-xl border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-                                    >
-                                        Open
-                                    </a>
+                            <div className="min-w-0 flex-1">
+                                <div className="truncate font-semibold text-zinc-900 dark:text-white" title={r.name}>{r.name}</div>
+                                <div className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">
+                                    <span className="font-mono">{r.id}</span>
+                                    {" · "}
+                                    {r.lastSeenMs ? `Last seen ${formatLastSeen(r.lastSeenMs)}` : "No data yet"}
                                 </div>
                             </div>
-                        </div>
+                            <StatusPill online={r.online} />
+                            <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400 transition-transform group-hover:translate-x-0.5" />
+                        </Link>
                     ))}
                 </div>
             )}

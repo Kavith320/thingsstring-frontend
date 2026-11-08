@@ -31,9 +31,16 @@ export function getLastTelemetryMs(lastTelemetry: any): number | null {
     return objectIdToMs(lastTelemetry._id);
 }
 
+/**
+ * A device is ONLINE if its last telemetry is newer than this.
+ * Must match the backend's DEVICE_OFFLINE_THRESHOLD_SEC (default 300s), which decides
+ * whether automations and schedules run, so the UI and the engine agree.
+ */
+export const DEVICE_OFFLINE_MS = 300_000;
+
 export function isOnlineFromLastTelemetry(
     lastTelemetry: any,
-    maxAgeMs = 60_000
+    maxAgeMs = DEVICE_OFFLINE_MS
 ): boolean {
     const ms = getLastTelemetryMs(lastTelemetry);
     if (!ms) return false;
@@ -55,4 +62,50 @@ export function formatLastSeen(ms: number | null | undefined): string {
 
     const daysAgo = Math.floor(hoursAgo / 24);
     return `${daysAgo}d ago`;
+}
+
+/* -------- Actuator auto/manual mode (mirrors backend services/deviceState.isAutoMode) -------- */
+export function isActuatorAuto(actuator: any): boolean {
+    if (!actuator || typeof actuator !== "object") return false;
+    if (typeof actuator.auto === "boolean") return actuator.auto;
+    return actuator.default?.auto === true;
+}
+
+/**
+ * Manual control (device page, AI assistant) is only allowed in MANUAL mode;
+ * in AUTO mode the actuator belongs to schedules and automations.
+ * Returns a user-facing reason when control is blocked, otherwise null.
+ */
+export function manualControlBlockReason(devices: any[], deviceId: string, actuatorKey: string): string | null {
+    const device = (devices || []).find(
+        (d: any) => d?.deviceId === deviceId || d?.config?._id === deviceId
+    );
+    if (!device) return `Device '${deviceId}' not found.`;
+    const actuator = device.control?.actuators?.[actuatorKey];
+    if (isActuatorAuto(actuator)) {
+        return `'${actuatorKey}' is in AUTO mode (controlled by schedules/automations). Switch it to MANUAL on the device page first.`;
+    }
+    return null;
+}
+
+const ACRONYMS = new Set(["rssi", "ph", "uv", "led", "tds", "ec", "ppm", "voc", "id", "ac", "dc", "pir", "ldr", "npk"]);
+
+/** "soil_moisture" / "soilMoisture" -> "Soil moisture"; codes stay upper case ("CO2", "RSSI"). */
+export function humanizeKey(key: string): string {
+    const words = String(key)
+        .replace(/([a-z])([A-Z])/g, "$1 $2")
+        .replace(/[_\-.]+/g, " ")
+        .trim()
+        .split(/\s+/);
+    const s = words
+        .map((w) => (ACRONYMS.has(w.toLowerCase()) || /\d/.test(w) ? w.toUpperCase() : w.toLowerCase()))
+        .join(" ");
+    return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Normalise the many ways firmware reports an on/off actuator. */
+export function toOnOff(v: any): "ON" | "OFF" {
+    if (v && typeof v === "object") return toOnOff(v.state ?? v.status ?? v.value);
+    const s = String(v ?? "").toUpperCase();
+    return s === "ON" || s === "1" || s === "TRUE" || s === "HIGH" ? "ON" : "OFF";
 }

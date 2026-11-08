@@ -3,7 +3,6 @@
 import { useEffect, useState, useRef } from "react";
 import { usePathname } from "next/navigation";
 import {
-  Bot,
   Sparkles,
   Send,
   X,
@@ -13,11 +12,9 @@ import {
   Maximize2,
   Trash2,
   Zap,
-  CheckCircle2,
-  AlertCircle,
-  Command,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import { manualControlBlockReason } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 interface ChatMessage {
@@ -173,21 +170,19 @@ export default function GlobalAiCopilot() {
       // Handle AI-driven Device Control Action
       if (res?.action && res.action.type === "CONTROL") {
         const { deviceId, actuatorKey, state } = res.action;
-        try {
+        const blocked = manualControlBlockReason(devicesContext, deviceId, actuatorKey);
+        if (blocked) {
+          actionExecutedText = `⚠️ Not executed: ${blocked}`;
+        } else {
           try {
             await apiRequest(`/api/devices/${deviceId}/control`, {
               method: "POST",
               body: { actuators: { [actuatorKey]: { state } } },
             });
-          } catch {
-            await apiRequest(`/api/devices/${deviceId}/actuators`, {
-              method: "POST",
-              body: { actuatorKey, state },
-            });
+            actionExecutedText = `⚡ Action Executed: Set ${actuatorKey} to ${state} on device ${deviceId}`;
+          } catch (actErr: any) {
+            actionExecutedText = `⚠️ Action Failed: ${actuatorKey} -> ${state} (${actErr.message || "API Error"})`;
           }
-          actionExecutedText = `⚡ Action Executed: Set ${actuatorKey} to ${state} on device ${deviceId}`;
-        } catch (actErr: any) {
-          actionExecutedText = `⚠️ Action Attempted: ${actuatorKey} -> ${state} (${actErr.message || "API Error"})`;
         }
       }
 
@@ -242,33 +237,11 @@ export default function GlobalAiCopilot() {
     ];
   };
 
+  // The /ai page is a full-screen chat already; opened elsewhere from the top bar or Ctrl+K
+  if (pathname?.startsWith("/ai")) return null;
+
   return (
     <>
-      {/* Floating Action Button (Always Visible when closed or minimized) */}
-      {(!isOpen || isMinimized) && (
-        <button
-          onClick={() => {
-            setIsOpen(true);
-            setIsMinimized(false);
-          }}
-          className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-full border border-indigo-500/30 bg-gradient-to-r from-indigo-900/90 via-purple-900/90 to-zinc-900/90 px-4 py-3 text-white shadow-2xl backdrop-blur-xl transition-all duration-300 hover:scale-105 hover:border-indigo-400 hover:shadow-indigo-500/25 active:scale-95 group"
-        >
-          <div className="relative flex h-7 w-7 items-center justify-center rounded-full bg-indigo-600 text-white shadow-inner">
-            <Bot className="h-4 w-4 transition-transform group-hover:rotate-12" />
-            <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-            </span>
-          </div>
-          <div className="flex flex-col items-start text-left">
-            <span className="text-xs font-bold tracking-wide">ThingsString AI</span>
-            <span className="text-[10px] text-indigo-300/80 font-mono flex items-center gap-0.5">
-              <Command className="h-2.5 w-2.5" />K
-            </span>
-          </div>
-        </button>
-      )}
-
       {/* Slide-Over AI Copilot Drawer */}
       {isOpen && (
         <div

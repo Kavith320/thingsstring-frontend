@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { apiRequest } from "@/lib/api";
+import StatusPill from "@/components/common/StatusPill";
 import {
     Thermometer,
     Droplets,
@@ -13,384 +15,345 @@ import {
     Wind,
     Sun,
     Battery,
-    ToggleLeft,
-    ToggleRight,
-    CircleDot,
-    Search
+    Search,
+    Radio,
+    Power,
+    ChevronRight,
+    WifiOff,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import LoadingSignal from "@/components/LoadingSignal";
+import {
+    cn,
+    formatLastSeen,
+    getLastTelemetryMs,
+    humanizeKey,
+    isActuatorAuto,
+    isOnlineFromLastTelemetry,
+    toOnOff,
+} from "@/lib/utils";
 
 /* -------- Types -------- */
-interface Telemetry {
-    _id?: string;
-    updatedAt?: string;
-    createdAt?: string;
-    ts?: string;
-    timestamp?: string;
-    [key: string]: any;
-}
-
 interface Device {
-    _id: string;
+    _id?: string;
     deviceId?: string;
     name?: string;
-    last_telemetry?: Telemetry;
+    last_telemetry?: Record<string, any> | null;
     config?: {
-        device?: {
-            name?: string;
-            model?: string;
-            device_id?: string;
-        };
-        actuators?: any;
+        device?: { name?: string; model?: string; device_id?: string };
+        actuators?: Record<string, any>;
     };
-    actuators?: any;
+    control?: { actuators?: Record<string, any> } | null;
 }
 
+interface Sensor { key: string; label: string; value: number; unit: string; icon: any }
+interface Actuator { key: string; label: string; state: "ON" | "OFF"; auto: boolean }
 interface DeviceRow {
     id: string;
     name: string;
     model: string;
     online: boolean;
     lastSeenMs: number | null;
-    sensors: { key: string; value: any; unit?: string; icon: any }[];
-    actuators: { key: string; state: string }[];
+    sensors: Sensor[];
+    actuators: Actuator[];
 }
 
-/* -------- Helpers -------- */
+/* -------- Sensor helpers -------- */
+const NON_SENSOR_KEYS = new Set([
+    "ts", "timestamp", "created_at", "createdAt", "updatedAt", "_id", "__v", "actuators", "UP", "up", "id", "uid",
+    "uuid", "deviceId", "device_id", "chipId", "chip_id", "time", "date", "meta", "raw",
+]);
+const MAX_SENSORS_ON_CARD = 4;
 
-function objectIdToMs(oid: any) {
-    if (!oid || typeof oid !== "string" || oid.length < 8) return null;
-    const sec = parseInt(oid.slice(0, 8), 16);
-    if (!Number.isFinite(sec)) return null;
-    return sec * 1000;
-}
-
-function getLastTelemetryMs(lastTelemetry?: Telemetry) {
-    if (!lastTelemetry) return null;
-    const t = lastTelemetry.updatedAt || lastTelemetry.createdAt || lastTelemetry.ts || lastTelemetry.timestamp || null;
-    if (t) {
-        const ms = new Date(t).getTime();
-        if (Number.isFinite(ms)) return ms;
-    }
-    return objectIdToMs(lastTelemetry._id);
-}
-
-function isOnlineFromLastTelemetry(lastTelemetry?: Telemetry, maxAgeMs = 60_000) {
-    const ms = getLastTelemetryMs(lastTelemetry);
-    if (!ms) return false;
-    return Date.now() - ms <= maxAgeMs;
-}
-
-function formatLastSeen(ms: number | null) {
-    if (!ms) return "No data";
-    const secAgo = Math.floor((Date.now() - ms) / 1000);
-    if (secAgo < 60) return "Just now";
-    if (secAgo < 3600) return `${Math.floor(secAgo / 60)}m ago`;
-    if (secAgo < 86400) return `${Math.floor(secAgo / 3600)}h ago`;
-    return new Date(ms).toLocaleDateString();
-}
-
-/**
- * Heuristic to pick an icon based on sensor key
- */
 function getIconForKey(key: string) {
     const k = key.toLowerCase();
     if (k.includes("temp")) return Thermometer;
-    if (k.includes("hum")) return Droplets;
+    if (k.includes("hum") || k.includes("moist") || k.includes("water")) return Droplets;
     if (k.includes("vol") || k.includes("batt")) return Battery;
     if (k.includes("cur") || k.includes("pwr") || k.includes("watt")) return Zap;
     if (k.includes("cpu") || k.includes("mem")) return Cpu;
     if (k.includes("sig") || k.includes("rssi")) return Wifi;
     if (k.includes("press")) return Gauge;
-    if (k.includes("wind")) return Wind;
+    if (k.includes("wind") || k.includes("co2") || k.includes("pm")) return Wind;
     if (k.includes("light") || k.includes("lux")) return Sun;
-    return Activity; // Default
+    return Activity;
 }
 
-/**
- * Heuristic to guess unit
- */
 function getUnitForKey(key: string) {
     const k = key.toLowerCase();
     if (k.includes("temp")) return "°C";
-    if (k.includes("hum")) return "%";
-    if (k.includes("batt")) return "%";
+    if (k.includes("hum") || k.includes("moist") || k.includes("batt") || k.includes("level")) return "%";
     if (k.includes("vol")) return "V";
     if (k.includes("cur")) return "A";
     if (k.includes("pres")) return "hPa";
-    if (k.includes("lux")) return "lx";
+    if (k.includes("lux") || k === "light") return "lx";
+    if (k.includes("rssi")) return "dBm";
+    if (k.includes("co2")) return "ppm";
     return "";
 }
 
+function formatValue(v: number) {
+    return Number.isInteger(v) ? String(v) : v.toFixed(1);
+}
+
+function toRow(d: Device): DeviceRow {
+    const id = d?.deviceId || d?.config?.device?.device_id || d?._id || "-";
+    const last = d?.last_telemetry || {};
+
+    const sensors: Sensor[] = Object.entries(last)
+        .filter(([k, v]) => !NON_SENSOR_KEYS.has(k) && typeof v === "number" && Number.isFinite(v))
+        .map(([k, v]) => ({ key: k, label: humanizeKey(k), value: v as number, unit: getUnitForKey(k), icon: getIconForKey(k) }));
+
+    // Desired state + mode come from device_control (what the backend acts on); the
+    // device's own report in telemetry wins for the live ON/OFF when present.
+    const control = d?.control?.actuators || {};
+    const config = d?.config?.actuators || {};
+    const reported = (last as any).actuators || {};
+    const keys = new Set([...Object.keys(control), ...Object.keys(config), ...Object.keys(reported)]);
+    const actuators: Actuator[] = [...keys].map((key) => {
+        const ctl = control[key] ?? config[key];
+        const live = reported[key] ?? ctl?.state ?? ctl?.status ?? ctl?.value ?? ctl?.default?.state;
+        return { key, label: humanizeKey(key), state: toOnOff(live), auto: isActuatorAuto(ctl) };
+    });
+
+    return {
+        id,
+        name: d?.config?.device?.name || d?.name || id,
+        model: d?.config?.device?.model || "Device",
+        online: isOnlineFromLastTelemetry(last),
+        lastSeenMs: getLastTelemetryMs(last),
+        sensors,
+        actuators,
+    };
+}
+
+/* -------- Page -------- */
 export default function DashboardPage() {
     const [devices, setDevices] = useState<Device[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [query, setQuery] = useState("");
 
+    // Consecutive failed polls. One dropped request is normal on a flaky link,
+    // so only surface a warning once several polls in a row have failed.
+    const failCount = useRef(0);
+
     async function loadDevices() {
-        setError("");
         try {
             const data: any = await apiRequest("/api/devices", { method: "GET" });
             const list: Device[] = Array.isArray(data) ? data : (data?.devices || []);
             setDevices(list);
+            failCount.current = 0;
+            setError("");
         } catch (e: any) {
-            setError(e.message || "Failed to load devices");
+            failCount.current += 1;
+            if (failCount.current >= 3) {
+                setError(`${e.message || "Failed to load devices"} Showing the last received data.`);
+            }
         } finally {
             setLoading(false);
         }
     }
 
     useEffect(() => {
-        setLoading(true);
         loadDevices();
-        const id = setInterval(loadDevices, 5000); // Fast 5s polling for "Realtime" feel
+        const id = setInterval(loadDevices, 5000);
         return () => clearInterval(id);
     }, []);
 
+    const allRows = useMemo(() => devices.map(toRow), [devices]);
+
     const rows = useMemo(() => {
-        const mapped: DeviceRow[] = (devices || []).map((d) => {
-            const id = d?.deviceId || d?.config?.device?.device_id || d?._id || "-";
-            const name = d?.config?.device?.name || d?.name || id || "Device";
-            const model = d?.config?.device?.model || "Generic";
-
-            const online = isOnlineFromLastTelemetry(d?.last_telemetry, 60_000);
-            const lastSeenMs = getLastTelemetryMs(d?.last_telemetry);
-
-            // Parse Sensors
-            const last = d?.last_telemetry || {};
-            const sensors: any[] = [];
-
-            Object.entries(last).forEach(([k, v]) => {
-                // Skip non-data fields
-                if (['ts', 'timestamp', 'created_at', 'updatedAt', '_id', '__v', 'actuators', 'UP', 'up', 'id', 'uid', 'uuid', 'deviceId', 'device_id', 'chipId', 'chip_id', 'time', 'date', 'meta', 'raw'].includes(k)) return;
-
-                // If it's a number, it's likely a sensor
-                if (typeof v === 'number') {
-                    sensors.push({
-                        key: k,
-                        value: v,
-                        unit: getUnitForKey(k),
-                        icon: getIconForKey(k)
-                    });
-                }
-            });
-
-            // Parse Actuators (Check both top-level config/actuators and telemetry/actuators)
-            const actuators: any[] = [];
-            // Merge config actuators and telemetry actuators
-            const configActs = d.config?.actuators || d.actuators || {};
-            const telemActs = last.actuators || {};
-
-            // Combine keys unique
-            const allActKeys = new Set([...Object.keys(configActs), ...Object.keys(telemActs)]);
-
-            allActKeys.forEach(key => {
-                // Technique from Device Page: Try telemetry, then top-level, then default
-                const tVal = telemActs[key];
-                const cVal = configActs[key];
-
-                // Extraction logic
-                let rawVal = tVal;
-                if (rawVal === undefined || rawVal === null) {
-                    rawVal = (typeof cVal === 'object') ? (cVal.value || cVal.state) : cVal;
-                }
-
-                // Fallback to default if still empty
-                if ((rawVal === undefined || rawVal === null) && typeof cVal === 'object' && cVal.default) {
-                    rawVal = cVal.default.state || cVal.default.value;
-                }
-
-                // Robust Normalization (Case Insensitive)
-                function normalize(v: any): "ON" | "OFF" {
-                    if (v === undefined || v === null) return "OFF";
-                    if (typeof v === 'object') return normalize(v.state || v.value);
-                    const s = String(v).toUpperCase();
-                    return (s === "ON" || s === "1" || s === "TRUE" || s === "HIGH") ? "ON" : "OFF";
-                }
-
-                const state = normalize(rawVal);
-
-                // Get Auto Mode (using technique from device page)
-                let auto = false;
-                if (typeof cVal === 'object') {
-                    if (typeof cVal.default?.auto === 'boolean') auto = cVal.default.auto;
-                    else if (typeof cVal.auto === 'boolean') auto = cVal.auto;
-                }
-
-                actuators.push({ key, state, auto });
-            });
-
-            return { id, name, model, online, lastSeenMs, sensors, actuators };
-        });
-
         const q = query.trim().toLowerCase();
-        if (!q) return mapped;
+        if (!q) return allRows;
+        return allRows.filter((r) => r.name.toLowerCase().includes(q) || String(r.id).toLowerCase().includes(q));
+    }, [allRows, query]);
 
-        return mapped.filter(
-            (r) =>
-                r.name.toLowerCase().includes(q) || String(r.id).toLowerCase().includes(q)
-        );
-    }, [devices, query]);
+    const stats = useMemo(() => {
+        const online = allRows.filter((r) => r.online).length;
+        const acts = allRows.flatMap((r) => r.actuators);
+        return {
+            total: allRows.length,
+            online,
+            offline: allRows.length - online,
+            actsOn: acts.filter((a) => a.state === "ON").length,
+            actsTotal: acts.length,
+        };
+    }, [allRows]);
+
+    const firstLoad = loading && devices.length === 0;
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-6">
             {/* Header */}
-            <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-4">
-                    <div>
-                        <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">System Overview</h2>
-                        <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Real-time status of your IoT fleet</p>
-                    </div>
-                    {loading && <LoadingSignal size="sm" className="hidden sm:flex" />}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                    <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-white">Overview</h2>
+                    <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Live status of your devices, refreshed every 5 seconds</p>
                 </div>
-
-                <div className="relative group w-full sm:w-auto">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-zinc-600 dark:group-focus-within:text-zinc-200 transition-colors" />
+                <label className="relative w-full sm:w-72">
+                    <span className="sr-only">Search devices</span>
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                     <input
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Search fleet..."
-                        className="pl-9 pr-4 py-2.5 rounded-2xl border border-zinc-200 bg-white/50 backdrop-blur-sm text-sm outline-none focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-white dark:focus:ring-white/10 w-full sm:w-64 transition-all shadow-sm"
+                        placeholder="Search devices…"
+                        className="h-11 w-full rounded-xl border border-zinc-200 bg-white pl-9 pr-3 text-sm outline-none transition focus:border-zinc-400 focus:ring-2 focus:ring-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-900 dark:focus:border-zinc-600"
                     />
-                </div>
+                </label>
             </div>
 
-            {/* Error State */}
+            {/* Summary */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <StatTile label="Devices" value={firstLoad ? "–" : stats.total} icon={Radio} />
+                <StatTile label="Online" value={firstLoad ? "–" : stats.online} icon={Wifi} tone="green" />
+                <StatTile label="Offline" value={firstLoad ? "–" : stats.offline} icon={WifiOff} tone={stats.offline ? "amber" : "neutral"} />
+                <StatTile label="Actuators on" value={firstLoad ? "–" : `${stats.actsOn}/${stats.actsTotal}`} icon={Power} />
+            </div>
+
             {error && (
-                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-600 dark:border-red-900/30 dark:bg-red-900/10 dark:text-red-400 animate-in fade-in zoom-in-95 duration-200">
+                <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
                     {error}
                 </div>
             )}
 
-            {/* Loading Overlay */}
-            {loading && !devices.length && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-50/10 dark:bg-zinc-950/10 backdrop-blur-md">
-                    <LoadingSignal size="lg" />
+            {/* Loading skeleton */}
+            {firstLoad && (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" aria-hidden>
+                    {[0, 1, 2].map((i) => (
+                        <div key={i} className="h-64 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
+                            <div className="h-5 w-2/3 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
+                            <div className="mt-2 h-3 w-1/3 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
+                            <div className="mt-6 grid grid-cols-2 gap-2">
+                                {[0, 1, 2, 3].map((j) => <div key={j} className="h-14 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}
+                            </div>
+                        </div>
+                    ))}
                 </div>
             )}
 
-            {/* Empty State */}
-            {!loading && rows.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-16 text-center rounded-3xl border border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/20">
-                    <CircleDot className="w-12 h-12 text-zinc-300 dark:text-zinc-700 mb-4" />
-                    <p className="text-zinc-900 dark:text-white font-bold text-lg">No devices found</p>
-                    <p className="text-zinc-500 text-sm mt-1 max-w-xs mx-auto">Waiting for your first telemetry packet to arrive...</p>
+            {/* Empty state */}
+            {!firstLoad && rows.length === 0 && (
+                <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-300 px-6 py-14 text-center dark:border-zinc-700">
+                    <Radio className="mb-3 h-10 w-10 text-zinc-300 dark:text-zinc-600" />
+                    {query ? (
+                        <p className="font-semibold text-zinc-900 dark:text-white">No devices match “{query}”</p>
+                    ) : (
+                        <>
+                            <p className="font-semibold text-zinc-900 dark:text-white">No devices yet</p>
+                            <p className="mt-1 max-w-sm text-sm text-zinc-500">
+                                Flash your device with your user ID and it will appear here after it sends its first configuration.
+                            </p>
+                            <Link href="/devices" className="mt-4 inline-flex h-10 items-center rounded-xl bg-zinc-900 px-4 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-white dark:text-black">
+                                How to add a device
+                            </Link>
+                        </>
+                    )}
                 </div>
             )}
 
-            {/* Device Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+            {/* Device grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
                 {rows.map((dev) => (
-                    <a
-                        key={dev.id}
-                        href={`/devices/${encodeURIComponent(dev.id)}`}
-                        className="
-                            group relative flex flex-col overflow-hidden
-                            rounded-3xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/40
-                            p-6 shadow-sm transition-all duration-300
-                            hover:shadow-xl hover:shadow-zinc-200/50 dark:hover:shadow-black/50
-                            hover:-translate-y-1
-                            backdrop-blur-xl
-                        "
-                    >
-                        {/* Header Row */}
-                        <div className="flex items-start justify-between mb-6">
-                            <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                    <h3 className="text-lg font-bold text-zinc-900 dark:text-white truncate">
-                                        {dev.name}
-                                    </h3>
-                                </div>
-                                <p className="text-xs font-mono text-zinc-400 uppercase tracking-wider mt-1 truncate">
-                                    {dev.model} • {dev.id}
-                                </p>
-                            </div>
-
-                            {/* Visual Status Indicator */}
-                            <div className={cn(
-                                "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold tracking-wide border shadow-sm",
-                                dev.online
-                                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                                    : "bg-zinc-100 border-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-400"
-                            )}>
-                                <span className={cn(
-                                    "w-1.5 h-1.5 rounded-full",
-                                    dev.online ? "bg-emerald-500 animate-pulse" : "bg-zinc-400"
-                                )} />
-                                {dev.online ? "ONLINE" : "OFFLINE"}
-                            </div>
-                        </div>
-
-                        {/* Middle: Data Grid */}
-                        <div className="flex-1 grid grid-cols-2 gap-3 mb-6">
-                            {/* Sensors */}
-                            {dev.sensors.length > 0 ? (
-                                dev.sensors.map((sensor, idx) => {
-                                    const Icon = sensor.icon;
-                                    return (
-                                        <div key={idx} className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-50 border border-zinc-100 dark:bg-white/5 dark:border-white/5">
-                                            <div className="w-8 h-8 rounded-full bg-white dark:bg-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-300 shadow-sm">
-                                                <Icon className="w-4 h-4" />
-                                            </div>
-                                            <div className="min-w-0">
-                                                <div className="text-sm font-bold text-zinc-900 dark:text-white truncate">
-                                                    {typeof sensor.value === 'number' ? sensor.value.toFixed(1) : sensor.value}
-                                                    <span className="text-xs text-zinc-400 font-normal ml-0.5">{sensor.unit}</span>
-                                                </div>
-                                                <div className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase tracking-wide truncate">
-                                                    {sensor.key}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })
-                            ) : (
-                                <div className="col-span-2 py-4 text-center text-xs text-zinc-400 italic">
-                                    No sensor data received
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Actuators Status Section */}
-                        {dev.actuators.length > 0 && (
-                            <div className="mb-6 pt-4 border-t border-zinc-100 dark:border-zinc-800/50">
-                                <p className="text-[10px] uppercase tracking-widest text-zinc-400 mb-3 font-semibold">Actuators Status</p>
-                                <div className="flex flex-wrap gap-2">
-                                    {dev.actuators.map((act: any, idx: number) => {
-                                        const isOn = act.state === "ON";
-                                        return (
-                                            <div key={idx} className={cn(
-                                                "flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl border text-xs font-medium transition-all duration-300",
-                                                isOn
-                                                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
-                                                    : "bg-zinc-50 border-zinc-200 text-zinc-500 dark:bg-zinc-900 dark:border-zinc-800"
-                                            )}>
-                                                <div className={cn(
-                                                    "w-2 h-2 rounded-full",
-                                                    isOn ? "bg-emerald-500 animate-pulse" : "bg-zinc-300 dark:bg-zinc-700"
-                                                )} />
-                                                <span>{act.key}</span>
-                                                <span className={cn(
-                                                    "ml-1 font-bold uppercase",
-                                                    isOn ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400"
-                                                )}>
-                                                    {act.state}
-                                                </span>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}                    {/* Footer */}
-                        <div className="mt-auto pt-4 border-t border-zinc-100 dark:border-zinc-800/50 flex justify-between items-center text-xs text-zinc-400">
-                            <span>Last seen {formatLastSeen(dev.lastSeenMs)}</span>
-                            <span className="group-hover:translate-x-1 transition-transform text-zinc-300 dark:text-zinc-600">Details →</span>
-                        </div>
-                    </a>
+                    <DeviceCard key={dev.id} dev={dev} />
                 ))}
             </div>
         </div>
+    );
+}
+
+/* -------- Components -------- */
+function StatTile({ label, value, icon: Icon, tone = "neutral" }: { label: string; value: string | number; icon: any; tone?: "neutral" | "green" | "amber" }) {
+    return (
+        <div className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-3 sm:p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+            <div className={cn(
+                "grid h-10 w-10 shrink-0 place-items-center rounded-xl",
+                tone === "green" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+                tone === "amber" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                tone === "neutral" && "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
+            )}>
+                <Icon className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+                <div className="text-xl font-bold leading-tight text-zinc-900 dark:text-white">{value}</div>
+                <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">{label}</div>
+            </div>
+        </div>
+    );
+}
+
+function DeviceCard({ dev }: { dev: DeviceRow }) {
+    const shown = dev.sensors.slice(0, MAX_SENSORS_ON_CARD);
+    const hidden = dev.sensors.length - shown.length;
+
+    return (
+        <Link
+            href={`/devices/${encodeURIComponent(dev.id)}`}
+            className="group flex flex-col rounded-2xl border border-zinc-200 bg-white p-4 sm:p-5 shadow-sm transition hover:border-zinc-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-zinc-800 dark:bg-zinc-900/40 dark:hover:border-zinc-700"
+        >
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <h3 className="truncate text-base font-semibold text-zinc-900 dark:text-white" title={dev.name}>{dev.name}</h3>
+                    <p className="mt-0.5 truncate font-mono text-xs text-zinc-500 dark:text-zinc-400">{dev.model} · {dev.id}</p>
+                </div>
+                <StatusPill online={dev.online} />
+            </div>
+
+            {/* Sensors */}
+            {shown.length > 0 ? (
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                    {shown.map((s) => {
+                        const Icon = s.icon;
+                        return (
+                            <div key={s.key} className="flex min-w-0 items-center gap-2.5 rounded-xl bg-zinc-50 px-3 py-2.5 dark:bg-white/5">
+                                <Icon className="h-4 w-4 shrink-0 text-zinc-400" />
+                                <div className="min-w-0">
+                                    <div className="whitespace-nowrap text-sm font-semibold text-zinc-900 dark:text-white">
+                                        {formatValue(s.value)}
+                                        {s.unit && <span className="ml-0.5 text-xs font-normal text-zinc-500">{s.unit}</span>}
+                                    </div>
+                                    <div className="truncate text-xs text-zinc-500 dark:text-zinc-400" title={s.label}>{s.label}</div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            ) : (
+                <p className="mt-4 rounded-xl bg-zinc-50 px-3 py-4 text-center text-sm text-zinc-500 dark:bg-white/5">No sensor readings yet</p>
+            )}
+            {hidden > 0 && <p className="mt-2 text-xs text-zinc-500">+{hidden} more reading{hidden > 1 ? "s" : ""}</p>}
+
+            {/* Actuators */}
+            {dev.actuators.length > 0 && (
+                <div className="mt-4 flex flex-wrap gap-1.5">
+                    {dev.actuators.map((a) => {
+                        const on = a.state === "ON";
+                        return (
+                            <span
+                                key={a.key}
+                                className={cn(
+                                    "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-medium",
+                                    on
+                                        ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                                        : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-400"
+                                )}
+                            >
+                                <span className={cn("h-1.5 w-1.5 rounded-full", on ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600")} />
+                                {a.label}
+                                <span className="font-semibold">{a.state}</span>
+                                {a.auto && <span className="rounded bg-indigo-500/10 px-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400">AUTO</span>}
+                            </span>
+                        );
+                    })}
+                </div>
+            )}
+
+            {/* Footer */}
+            <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+                <span>Last seen {formatLastSeen(dev.lastSeenMs)}</span>
+                <span className="inline-flex items-center gap-0.5 font-medium text-zinc-700 group-hover:text-zinc-900 dark:text-zinc-300 dark:group-hover:text-white">
+                    Open <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                </span>
+            </div>
+        </Link>
     );
 }

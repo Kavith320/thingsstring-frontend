@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
-import { apiRequest } from "../../../../lib/api";
-import { formatLastSeen } from "@/lib/utils";
+import { apiRequest, apiDownload } from "../../../../lib/api";
+import { formatLastSeen, isActuatorAuto, humanizeKey, DEVICE_OFFLINE_MS } from "@/lib/utils";
+import Link from "next/link";
+import StatusPill from "@/components/common/StatusPill";
 
 import TelemetryGraph from "@/components/devices/TelemetryGraph";
 import SensorsGrid from "@/components/devices/SensorsGrid";
 import LoadingSignal from "@/components/LoadingSignal";
 import Switch from "@/components/common/Switch";
-import { Sparkles, Power } from "lucide-react";
+import { Power, Download, ChevronDown, CalendarClock, RefreshCw } from "lucide-react";
 
 /* ---------------- helpers: time + online ---------------- */
 
@@ -38,7 +40,7 @@ function getLastTelemetryMs(lastTelemetry) {
   return objectIdToMs(lastTelemetry._id);
 }
 
-function getOnlineInfo(device, maxAgeMs = 60_000) {
+function getOnlineInfo(device, maxAgeMs = DEVICE_OFFLINE_MS) {
   const ms = getLastTelemetryMs(device?.last_telemetry);
   if (!ms) return { online: false, lastSeenMs: null, ageMs: Infinity };
   const ageMs = Date.now() - ms;
@@ -47,19 +49,8 @@ function getOnlineInfo(device, maxAgeMs = 60_000) {
 
 /* ---------------- helpers: actuator read ---------------- */
 
-function getActAuto(act) {
-  if (!act) return false;
-  if (typeof act?.default?.auto === "boolean") return act.default.auto;
-  if (typeof act?.auto === "boolean") return act.auto;
-  return false;
-}
-
-function getActDesiredState(act) {
-  if (!act) return "OFF";
-  if (act?.default?.state) return act.default.state;
-  if (act?.state) return act.state;
-  return "OFF";
-}
+// Same rule as the backend (live `auto` first, then `default.auto`)
+const getActAuto = isActuatorAuto;
 
 function getActLiveState(actKey, telemetryActuators, act) {
   const t = telemetryActuators?.[actKey];
@@ -69,32 +60,112 @@ function getActLiveState(actKey, telemetryActuators, act) {
   return "OFF";
 }
 
-/* ---------------- UI helpers ---------------- */
+/* ---------------- CSV export ---------------- */
 
-function Card({ title, right, children }) {
+const EXPORT_RANGES = [
+  { label: "All stored data", ms: null },
+  { label: "Last 7 days", ms: 7 * 24 * 60 * 60 * 1000 },
+  { label: "Last 24 hours", ms: 24 * 60 * 60 * 1000 },
+];
+
+/**
+ * Downloads the device's raw telemetry as CSV from
+ * GET /api/devices/:id/telemetry/export[?from=]. The backend keeps telemetry for a
+ * limited time (retentionDays, 7 by default), so "All" means all that is still stored.
+ */
+function CsvExportButton({ deviceId, onMessage }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  async function exportCsv(range) {
+    setOpen(false);
+    setBusy(true);
+    onMessage("");
+    try {
+      const qs = range.ms ? `?from=${new Date(Date.now() - range.ms).toISOString()}` : "";
+      // Built here because the backend's CORS setup doesn't expose Content-Disposition
+      const safeId = String(deviceId).replace(/[^A-Za-z0-9_-]/g, "_");
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      await apiDownload(
+        `/api/devices/${encodeURIComponent(deviceId)}/telemetry/export${qs}`,
+        `${safeId}_telemetry_${stamp}.csv`
+      );
+      onMessage("✅ CSV downloaded.");
+    } catch (e) {
+      const notSupported = /not found/i.test(e.message) && !/device/i.test(e.message);
+      onMessage(
+        notSupported
+          ? "❌ CSV export isn't available on the server yet (backend needs updating)."
+          : `❌ Export failed: ${e.message}`
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <div className="rounded-3xl border shadow-sm border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/40 backdrop-blur-md overflow-hidden transition-all duration-300">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-5 py-4 border-b border-zinc-100 dark:border-zinc-800/50">
-        <div className="font-bold text-zinc-900 dark:text-white tracking-tight">{title}</div>
-        {right ? <div className="shrink-0">{right}</div> : null}
-      </div>
-      <div className="p-4 sm:p-6">{children}</div>
+    <div ref={menuRef} className="relative flex-1 lg:flex-none">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={busy}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="w-full inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 transition disabled:opacity-60"
+      >
+        <Download className="h-4 w-4" />
+        {busy ? "Preparing…" : <><span className="sm:hidden">CSV</span><span className="hidden sm:inline">Download CSV</span></>}
+        <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-30 mt-2 w-full sm:w-52 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
+        >
+          {EXPORT_RANGES.map((r) => (
+            <button
+              key={r.label}
+              type="button"
+              role="menuitem"
+              onClick={() => exportCsv(r)}
+              className="block w-full px-4 py-2.5 text-left text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-900"
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function Badge({ tone = "neutral", children }) {
-  const cls =
-    tone === "green"
-      ? "bg-green-500/10 border-green-500/30 text-green-600 dark:text-green-400"
-      : tone === "red"
-        ? "bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-300"
-        : "bg-zinc-500/10 border-zinc-500/30 text-zinc-700 dark:text-zinc-200";
+/* ---------------- UI helpers ---------------- */
 
+function Card({ title, right, children }) {
   return (
-    <span className={`text-xs px-2 py-1 rounded-full border ${cls}`}>
-      {children}
-    </span>
+    <section className="rounded-2xl border shadow-sm border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40 overflow-hidden">
+      <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3.5 border-b border-zinc-100 dark:border-zinc-800">
+        <h3 className="font-semibold text-zinc-900 dark:text-white">{title}</h3>
+        {right ? <div className="shrink-0">{right}</div> : null}
+      </div>
+      <div className="p-4 sm:p-6">{children}</div>
+    </section>
   );
 }
 
@@ -116,25 +187,6 @@ function StateBadge({ state }) {
   );
 }
 
-function Btn({ children, onClick, disabled, variant = "outline", type = "button" }) {
-  const base = "rounded-xl px-3 py-2 text-sm disabled:opacity-60 whitespace-nowrap";
-  const cls =
-    variant === "solid"
-      ? "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-      : "border border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800";
-
-  return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={disabled}
-      className={`${base} ${cls}`}
-    >
-      {children}
-    </button>
-  );
-}
-
 /* ---------------- Page ---------------- */
 
 export default function DeviceDetailsPage() {
@@ -142,31 +194,26 @@ export default function DeviceDetailsPage() {
   const deviceId = params?.deviceId;
 
   const [device, setDevice] = useState(null);
-  const [history, setHistory] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
   const [msg, setMsg] = useState("");
   const [busyAct, setBusyAct] = useState("");
+  // Read inside the poller so a busy toggle doesn't restart polling
+  const busyActRef = useRef("");
+  busyActRef.current = busyAct;
 
   const fetchDevice = useCallback(async () => {
     const res = await apiRequest(`/api/devices/${deviceId}`, { method: "GET" });
     return res?.device || res;
   }, [deviceId]);
 
-  const fetchHistory = useCallback(async () => {
-    const res = await apiRequest(
-      `/api/devices/${deviceId}/telemetry?limit=10000`,
-      { method: "GET" }
-    );
-    return Array.isArray(res) ? res : res?.telemetry || res?.items || [];
-  }, [deviceId]);
-
   const loadDeviceOnce = useCallback(async () => {
-    setErr("");
     try {
       const d = await fetchDevice();
+      setErr("");
+      const busyAct = busyActRef.current;
       setDevice(prev => {
         if (!prev || !busyAct) return d;
 
@@ -187,43 +234,28 @@ export default function DeviceDetailsPage() {
         return d;
       });
     } catch (e) {
+      // Keep showing the last good data; the page shows a "reconnecting" notice instead
       setErr(e.message || "Failed to load device");
     } finally {
       setLoading(false);
     }
-  }, [fetchDevice, busyAct]);
-
-  const loadHistoryOnce = useCallback(async () => {
-    try {
-      const list = await fetchHistory();
-      setHistory(list);
-    } catch {
-      // graphs optional
-    }
-  }, [fetchHistory]);
+  }, [fetchDevice]);
 
   useEffect(() => {
     if (!deviceId) return;
 
     setLoading(true);
     loadDeviceOnce();
-    loadHistoryOnce();
-
     const pollDevice = setInterval(loadDeviceOnce, 5_000);
-    const pollHistory = setInterval(loadHistoryOnce, 30_000);
-
-    return () => {
-      clearInterval(pollDevice);
-      clearInterval(pollHistory);
-    };
-  }, [deviceId, loadDeviceOnce, loadHistoryOnce]);
+    return () => clearInterval(pollDevice);
+  }, [deviceId, loadDeviceOnce]);
 
   const meta = useMemo(() => {
     const cfg = device?.config || {};
     const dev = cfg?.device || {};
     const control = device?.control || {};
     const last = device?.last_telemetry || {};
-    const st = getOnlineInfo(device, 60_000);
+    const st = getOnlineInfo(device);
 
     return {
       id: device?.deviceId || dev?.device_id || deviceId,
@@ -337,7 +369,8 @@ export default function DeviceDetailsPage() {
     return <div className="text-sm text-zinc-500 dark:text-zinc-400">Loading…</div>;
   }
 
-  if (err) {
+  // Only a hard error when nothing has loaded yet; later failures are transient
+  if (err && !device) {
     return (
       <div className="rounded-2xl border p-4 border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300">
         {err}
@@ -353,136 +386,149 @@ export default function DeviceDetailsPage() {
 
   const actuatorCount = Object.keys(meta.controlActuators || {}).length;
 
+  const msgTone = /^❌/.test(msg) ? "red" : /^⚠️/.test(msg) ? "amber" : "green";
+  const msgText = msg.replace(/^(❌|⚠️|✅)\s*/u, "");
+
   return (
-    <div className="mx-auto w-full max-w-6xl px-3 sm:px-6 lg:px-8 py-4 space-y-4">
+    <div className="space-y-4">
+      {err && (
+        <div role="status" className="rounded-xl border px-4 py-2.5 text-sm border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300">
+          Connection interrupted, retrying… Showing the last received data.
+        </div>
+      )}
+
       {/* Header */}
-      <div className="rounded-3xl border p-5 sm:p-6 border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/40 shadow-sm">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0 space-y-1">
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-white truncate">
-              {meta.name}
-            </h1>
-
-            <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
-              <span className="font-mono text-xs px-2 py-0.5 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
-                {meta.id}
-              </span>
+      <section className="rounded-2xl border p-4 sm:p-6 border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-start gap-3">
+              <h2 className="min-w-0 flex-1 text-xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-white break-words">
+                {meta.name}
+              </h2>
+              <StatusPill online={meta.online} className="mt-1 sm:mt-2" />
             </div>
-
-            <div className="pt-3 flex flex-wrap gap-2">
-              <Badge>{`V: ${meta.firmware}`}</Badge>
-              <Badge>{`Model: ${meta.model}`}</Badge>
-              <Badge tone={meta.online ? "green" : "red"}>
-                {meta.online ? "ONLINE" : "OFFLINE"}
-              </Badge>
-              {lastSeenFormatted && <Badge>{`Updated: ${lastSeenFormatted}`}</Badge>}
-            </div>
-
-            <div className="pt-2 text-[10px] text-zinc-400 uppercase tracking-widest font-medium">
-              Refresh Interval: 5s • Last Ping: {Math.round(meta.ageMs / 1000)}s ago
-            </div>
-
-            {msg && (
-              <div className="mt-4 p-3 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-xs font-medium text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-500/20 animate-in fade-in slide-in-from-top-1">
-                {msg}
-              </div>
-            )}
+            <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-zinc-500 dark:text-zinc-400">
+              <span className="font-mono text-xs rounded-md bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">{meta.id}</span>
+              <span aria-hidden>·</span>
+              <span>{meta.model}</span>
+              <span aria-hidden>·</span>
+              <span>Firmware {meta.firmware}</span>
+              <span aria-hidden>·</span>
+              <span>{lastSeenFormatted ? `Last seen ${lastSeenFormatted}` : "No data yet"}</span>
+            </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-2.5 w-full lg:w-auto">
-            <a
+          <div className="flex gap-2 w-full lg:w-auto">
+            <Link
               href={`/devices/${encodeURIComponent(meta.id)}/schedules`}
-              className="flex-1 sm:flex-none inline-flex items-center justify-center rounded-2xl border border-zinc-200 px-6 py-3 text-sm font-bold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900 transition-all active:scale-95 shadow-sm"
+              className="flex-1 lg:flex-none inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 transition"
             >
+              <CalendarClock className="h-4 w-4" />
               Schedules
-            </a>
-
+            </Link>
+            <CsvExportButton deviceId={meta.id} onMessage={setMsg} />
             <button
-              onClick={() => {
-                loadDeviceOnce();
-                loadHistoryOnce();
-              }}
-              className="flex-1 sm:flex-none inline-flex items-center justify-center rounded-2xl bg-zinc-900 px-6 py-3 text-sm font-bold text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 transition-all active:scale-95 shadow-lg shadow-zinc-900/10 dark:shadow-white/5"
+              type="button"
+              onClick={loadDeviceOnce}
+              aria-label="Refresh now"
+              title="Refresh now (updates every 5 s)"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-zinc-200 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 transition"
             >
-              Force Refresh
+              <RefreshCw className="h-4 w-4" />
             </button>
           </div>
         </div>
-      </div>
 
-      {/* ✅ Actuators (only render when device has actuators) */}
+        {msg && (
+          <div
+            role="status"
+            className={
+              "mt-4 rounded-xl border px-3 py-2.5 text-sm " +
+              (msgTone === "red"
+                ? "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300"
+                : msgTone === "amber"
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+                  : "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300")
+            }
+          >
+            {msgText}
+          </div>
+        )}
+      </section>
+
+      {/* Actuators */}
       {actuatorCount > 0 && (
         <Card
-          title="Actuators (Mode + Manual Control)"
-          right={
-            <div className="text-xs text-zinc-500 dark:text-zinc-400">
-              {`${actuatorCount} actuators`}
-            </div>
-          }
+          title="Controls"
+          right={<span className="text-xs text-zinc-500 dark:text-zinc-400">{actuatorCount} actuator{actuatorCount > 1 ? "s" : ""}</span>}
         >
-          <div className="grid gap-3">
+          <div className="grid gap-3 md:grid-cols-2">
             {Object.entries(meta.controlActuators).map(([actKey, act]) => {
-              const type = act?.type || meta.cfgActuators?.[actKey]?.type || "-";
+              const type = act?.type || meta.cfgActuators?.[actKey]?.type;
               const auto = getActAuto(act);
               const liveState = getActLiveState(actKey, meta.telemetryActuators, act);
+              const isOn = String(liveState).toUpperCase() === "ON";
               const rowBusy = busyAct === actKey;
 
               return (
                 <div
                   key={actKey}
-                  className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950/35"
+                  className="relative overflow-hidden rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/30"
                 >
-                  {/* Absolute Loading Overlay - Prevents layout jumping */}
                   {rowBusy && (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60 backdrop-blur-[1px] dark:bg-zinc-950/60 animate-in fade-in duration-300">
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60 dark:bg-zinc-950/60" aria-live="polite">
                       <LoadingSignal size="sm" />
+                      <span className="sr-only">Sending command…</span>
                     </div>
                   )}
 
-                  <div className="p-4 sm:p-5">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                      {/* Left: Info */}
-                      <div className="flex items-center justify-between lg:justify-start gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="font-bold text-zinc-900 dark:text-white text-base tracking-tight">{actKey}</div>
-                          <Badge>{type}</Badge>
-                        </div>
-                        {/* Mobile/Tablet State Badge (right-aligned) */}
-                        <div className="lg:hidden">
-                          <StateBadge state={liveState} />
-                        </div>
-                      </div>
-
-                      {/* Right: Controls */}
-                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 sm:gap-8">
-                        <div className="flex items-center justify-between sm:justify-start gap-4 h-10 px-3 sm:px-0 rounded-xl bg-zinc-50 sm:bg-transparent dark:bg-zinc-900/50 sm:dark:bg-transparent">
-                          <Switch
-                            label="Auto Mode"
-                            checked={auto}
-                            disabled={rowBusy}
-                            variant="emerald"
-                            icon={Sparkles}
-                            onChange={() => toggleActuatorAuto(actKey)}
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-between sm:justify-start gap-4 h-10 px-3 sm:px-0 rounded-xl bg-zinc-50 sm:bg-transparent dark:bg-zinc-900/50 sm:dark:bg-transparent">
-                          <Switch
-                            label="Manual Control"
-                            checked={liveState === "ON"}
-                            disabled={rowBusy || auto}
-                            icon={Power}
-                            onChange={(checked) => setActuatorState(actKey, checked ? "ON" : "OFF")}
-                          />
-                        </div>
-
-                        {/* Desktop State Badge */}
-                        <div className="hidden lg:block min-w-[70px] text-right ml-4">
-                          <StateBadge state={liveState} />
-                        </div>
-                      </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold text-zinc-900 dark:text-white">{humanizeKey(actKey)}</div>
+                      <div className="text-xs text-zinc-500">{type ? `${type} · ` : ""}<span className="font-mono">{actKey}</span></div>
                     </div>
+                    <StateBadge state={liveState} />
                   </div>
+
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    {/* Mode */}
+                    <div role="radiogroup" aria-label={`${actKey} mode`} className="inline-flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+                      {[
+                        { label: "Auto", value: true },
+                        { label: "Manual", value: false },
+                      ].map((m) => (
+                        <button
+                          key={m.label}
+                          type="button"
+                          role="radio"
+                          aria-checked={auto === m.value}
+                          disabled={rowBusy}
+                          onClick={() => auto !== m.value && toggleActuatorAuto(actKey)}
+                          className={
+                            "h-9 min-w-[4.5rem] rounded-md px-3 text-sm font-semibold transition " +
+                            (auto === m.value
+                              ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-950 dark:text-white"
+                              : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200")
+                          }
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Power */}
+                    <Switch
+                      checked={isOn}
+                      disabled={rowBusy || auto}
+                      icon={Power}
+                      variant="emerald"
+                      ariaLabel={`Turn ${actKey} ${isOn ? "off" : "on"}`}
+                      onChange={(checked) => setActuatorState(actKey, checked ? "ON" : "OFF")}
+                    />
+                  </div>
+                  <p className="mt-2 min-h-4 text-xs text-zinc-500 dark:text-zinc-400">
+                    {auto ? "Controlled by schedules and automations" : "You control this actuator"}
+                  </p>
                 </div>
               );
             })}
@@ -490,14 +536,14 @@ export default function DeviceDetailsPage() {
         </Card>
       )}
 
-      {/* ✅ Sensors tiles */}
-      <Card title="Sensors (Latest)">
+      {/* Sensors */}
+      <Card title="Latest readings">
         <SensorsGrid lastTelemetry={device?.last_telemetry} />
       </Card>
 
       {/* Graphs */}
-      <Card title="Telemetry Graphs">
-        <TelemetryGraph deviceId={meta.id} history={history} />
+      <Card title="History">
+        <TelemetryGraph deviceId={meta.id} />
       </Card>
     </div>
   );

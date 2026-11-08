@@ -1,60 +1,53 @@
 "use client";
 
-import { MoreVertical, LogOut, Sparkles } from "lucide-react";
-import { logout } from "@/lib/auth/actions";
+import { usePathname } from "next/navigation";
+import { Menu, Sparkles } from "lucide-react";
 
-export default function Topbar({
-  title = "Dashboard",
-  onMenuClick, // 👈 passed from DashboardLayout
-}) {
+/** Page title for the current route (longest matching prefix wins). */
+const TITLES = [
+  [/^\/devices\/[^/]+\/schedules/, "Schedules"],
+  [/^\/devices\/[^/]+/, "Device"],
+  [/^\/devices/, "Devices"],
+  [/^\/automation/, "Automation"],
+  [/^\/ai/, "ThingsString AI"],
+  [/^\/settings/, "Settings"],
+  [/^\/dashboard/, "Dashboard"],
+];
+
+export default function Topbar({ onMenuClick }) {
+  const pathname = usePathname() || "";
+  const title = TITLES.find(([re]) => re.test(pathname))?.[1] || "ThingsString";
+  const onAiPage = pathname.startsWith("/ai");
+
   return (
-    <header className="sticky top-0 z-30 h-16 border-b border-zinc-200 bg-white/70 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/60">
-      <div className="h-full px-4 sm:px-6 flex items-center justify-between gap-3">
-        {/* Left side */}
-        <div className="flex items-center gap-2 min-w-0">
-          {/* Mobile: 3-dots */}
+    <header className="sticky top-0 z-30 h-14 sm:h-16 border-b border-zinc-200 bg-white/85 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
+      <div className="h-full px-3 sm:px-6 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 min-w-0">
           <button
+            type="button"
             onClick={onMenuClick}
-            className="md:hidden rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            className="md:hidden -ml-1 grid h-10 w-10 place-items-center rounded-xl text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
             aria-label="Open menu"
           >
-            <MoreVertical className="h-5 w-5" />
+            <Menu className="h-5 w-5" />
           </button>
-
-          <div className="min-w-0">
-            <div className="text-sm sm:text-base font-semibold truncate">
-              {title}
-            </div>
-            <div className="hidden sm:block text-xs text-zinc-500">
-              Monitor • Control • Alerts
-            </div>
-          </div>
+          <h1 className="text-base sm:text-lg font-semibold truncate text-zinc-900 dark:text-zinc-100">
+            {title}
+          </h1>
         </div>
 
-        {/* Right side */}
-        <div className="flex items-center gap-2">
+        {!onAiPage && (
           <button
-            onClick={() => typeof window !== "undefined" && window.dispatchEvent(new CustomEvent("open-ai-copilot"))}
-            className="flex items-center gap-1.5 rounded-xl border border-indigo-500/20 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 px-3 py-2 text-xs font-semibold hover:bg-indigo-500/20 transition shadow-sm"
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("open-ai-copilot"))}
+            className="flex h-10 items-center gap-1.5 rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-3 text-sm font-semibold text-indigo-600 transition hover:bg-indigo-500/20 dark:text-indigo-400"
+            aria-label="Open ThingsString AI assistant"
+            title="ThingsString AI (Ctrl+K)"
           >
-            <Sparkles className="h-3.5 w-3.5 text-indigo-500" />
-            <span className="hidden sm:inline">ThingsString AI</span>
+            <Sparkles className="h-4 w-4" />
+            <span className="hidden sm:inline">Ask AI</span>
           </button>
-
-          <button
-            onClick={logout}
-            className="
-              flex items-center gap-2
-              rounded-xl bg-zinc-900 text-white
-              px-3 py-2 text-sm
-              hover:bg-zinc-800
-              dark:bg-white dark:text-black dark:hover:bg-zinc-200
-            "
-          >
-            <LogOut className="h-4 w-4" />
-            <span className="hidden sm:inline">Logout</span>
-          </button>
-        </div>
+        )}
       </div>
     </header>
   );
