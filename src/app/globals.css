@@ -205,3 +205,55 @@ body {
 .ts-signal-delayed {
   animation-delay: 1s;
 }
+/* ---------- Landing: logo "network draws itself" intro ----------
+   Pure CSS (no JS timeline, so it can't get stuck). Plays on first paint; an inline script
+   adds html[data-intro="seen"] for repeat visits, which shows the finished logo straight away. */
+@keyframes ts-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes ts-pop { 0% { transform: scale(0); opacity: 0; } 70% { transform: scale(1.25); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes ts-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+.ts-intro .ts-line { stroke-dasharray: 1; animation: ts-draw 900ms cubic-bezier(.65, 0, .35, 1) both; }
+.ts-intro .ts-line-branch { animation-delay: 450ms; animation-duration: 600ms; }
+.ts-intro .ts-node { transform-box: fill-box; transform-origin: center; animation: ts-pop 450ms cubic-bezier(.34, 1.56, .64, 1) both; }
+.ts-intro .ts-node-1 { animation-delay: 250ms; }
+.ts-intro .ts-node-2 { animation-delay: 0ms; }
+.ts-intro .ts-node-3 { animation-delay: 650ms; }
+.ts-intro .ts-node-4 { animation-delay: 900ms; }
+.ts-intro-text { animation: ts-rise 600ms ease-out both; }
+.ts-intro-text-1 { animation-delay: 500ms; }
+.ts-intro-text-2 { animation-delay: 650ms; }
+.ts-intro-text-3 { animation-delay: 800ms; }
+
+html[data-intro="seen"] .ts-intro .ts-line,
+html[data-intro="seen"] .ts-intro .ts-node,
+html[data-intro="seen"] .ts-intro-text { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ts-intro .ts-line, .ts-intro .ts-node, .ts-intro-text { animation: none !important; }
+}
+
+/* ---------- Landing: scroll reveal, live preview ---------- */
+html.ts-js [data-reveal] {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 700ms ease, transform 700ms cubic-bezier(.2, .7, .2, 1);
+  transition-delay: var(--d, 0ms);
+}
+html.ts-js [data-reveal].is-visible { opacity: 1; transform: none; }
+
+.ts-header { transition: box-shadow 300ms ease, background-color 300ms ease; }
+html[data-scrolled] .ts-header { box-shadow: 0 1px 0 rgb(0 0 0 / 0.04), 0 8px 24px -12px rgb(0 0 0 / 0.15); }
+
+@keyframes ts-tick-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.ts-tick { animation: ts-tick-in 350ms ease-out both; }
+.ts-path { transition: d 1.6s linear, cy 1.6s linear; }
+
+@media (hover: hover) {
+  .ts-lift { transition: transform 250ms ease, box-shadow 250ms ease, border-color 250ms ease; }
+  .ts-lift:hover { transform: translateY(-3px); box-shadow: 0 12px 30px -16px rgb(0 0 0 / 0.25); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.ts-js [data-reveal] { opacity: 1; transform: none; transition: none; }
+  .ts-tick, .ts-path, .ts-lift { animation: none !important; transition: none !important; }
+}

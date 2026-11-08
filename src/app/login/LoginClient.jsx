@@ -22,8 +22,11 @@ export default function LoginClient() {
   const [nextPath, setNextPath] = useState("/dashboard");
 
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search).get("next");
+    const params = new URLSearchParams(window.location.search);
+    const p = params.get("next");
     if (p) setNextPath(p);
+    // Landing page "Create account" links here with ?mode=register
+    if (params.get("mode") === "register") setMode("register");
   }, []);
 
   const [mode, setMode] = useState("login"); // "login" | "register"

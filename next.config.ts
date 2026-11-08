@@ -22,7 +22,6 @@ const nextConfig: NextConfig = {
       "recharts",
       "@xyflow/react",
       "@google/generative-ai",
-      "animejs",
     ],
   },
 };
