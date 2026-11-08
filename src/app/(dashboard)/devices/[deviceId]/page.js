@@ -8,13 +8,15 @@ import Link from "next/link";
 import StatusPill from "@/components/common/StatusPill";
 import { IconBadge } from "@/components/common/ui";
 import DeviceCustomizeModal from "@/components/devices/DeviceCustomizeModal";
-import { arrangeEntries, deviceDisplayName, deviceOnline, deviceUi } from "@/lib/deviceUi";
+import { arrangeEntries, deviceDisplayName, deviceOnline, deviceUi, deviceRole, canControl, canManageSharing, ROLE_LABELS } from "@/lib/deviceUi";
+import DeviceSharingModal from "@/components/devices/DeviceSharingModal";
+import DeviceActivity from "@/components/devices/DeviceActivity";
 
 import TelemetryGraph from "@/components/devices/TelemetryGraph";
 import SensorsGrid from "@/components/devices/SensorsGrid";
 import LoadingSignal from "@/components/LoadingSignal";
 import Switch from "@/components/common/Switch";
-import { Power, Download, ChevronDown, CalendarClock, RefreshCw, SlidersHorizontal, Radio } from "lucide-react";
+import { Power, Download, ChevronDown, CalendarClock, RefreshCw, SlidersHorizontal, Radio, Users, Eye } from "lucide-react";
 
 /* ---------------- helpers: time + online ---------------- */
 
@@ -122,7 +124,7 @@ function CsvExportButton({ deviceId, onMessage }) {
   }
 
   return (
-    <div ref={menuRef} className="relative flex-1 lg:flex-none">
+    <div ref={menuRef} className="relative flex-1 min-w-[7.5rem] lg:flex-none">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -204,6 +206,7 @@ export default function DeviceDetailsPage() {
   const [msg, setMsg] = useState("");
   const [busyAct, setBusyAct] = useState("");
   const [customizing, setCustomizing] = useState(false);
+  const [sharing, setSharing] = useState(false);
   // Read inside the poller so a busy toggle doesn't restart polling
   const busyActRef = useRef("");
   busyActRef.current = busyAct;
@@ -267,6 +270,10 @@ export default function DeviceDetailsPage() {
       id: device?.deviceId || dev?.device_id || deviceId,
       name: device ? deviceDisplayName(device) : deviceId,
       ui,
+      role: device ? deviceRole(device) : "owner",
+      canControl: device ? canControl(device) : true,
+      canManage: device ? canManageSharing(device) : false,
+      sharedBy: device?.sharedBy || null,
       // Saved order/labels first; hidden controls are left out (they still run from schedules)
       actuatorEntries: arrangeEntries(Object.keys(controlActuators), ui.actuators).filter((e) => e.visible),
       model: dev?.model || "-",
@@ -417,6 +424,12 @@ export default function DeviceDetailsPage() {
               </h2>
               <StatusPill online={meta.online} className="mt-1 sm:mt-2" />
             </div>
+            {meta.sharedBy && (
+              <p className="mt-1.5 inline-flex flex-wrap items-center gap-1.5 rounded-lg bg-indigo-500/10 px-2 py-1 text-xs font-medium text-indigo-700 dark:text-indigo-300">
+                <Users className="h-3.5 w-3.5" aria-hidden />
+                Shared by {meta.sharedBy.name || meta.sharedBy.email} · You&apos;re {ROLE_LABELS[meta.role]}
+              </p>
+            )}
             {meta.ui.description && (
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{meta.ui.description}</p>
             )}
@@ -431,15 +444,28 @@ export default function DeviceDetailsPage() {
             </p>
           </div>
 
-          <div className="flex gap-2 w-full lg:w-auto">
+          <div className="flex flex-wrap gap-2 w-full lg:w-auto lg:flex-nowrap">
             <Link
               href={`/devices/${encodeURIComponent(meta.id)}/schedules`}
-              className="flex-1 lg:flex-none inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 transition"
+              className="flex-1 min-w-[7.5rem] lg:flex-none inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 transition"
             >
               <CalendarClock className="h-4 w-4" />
               Schedules
             </Link>
             <CsvExportButton deviceId={meta.id} onMessage={setMsg} />
+            <div className="flex gap-2 ml-auto">
+            {meta.canManage && (
+              <button
+                type="button"
+                onClick={() => setSharing(true)}
+                aria-label="Share device"
+                title="Invite people and manage access"
+                className="inline-flex h-11 w-11 sm:w-auto shrink-0 items-center justify-center gap-2 rounded-xl border border-zinc-200 sm:px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 transition"
+              >
+                <Users className="h-4 w-4" />
+                <span className="hidden sm:inline">Share</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setCustomizing(true)}
@@ -459,6 +485,7 @@ export default function DeviceDetailsPage() {
             >
               <RefreshCw className="h-4 w-4" />
             </button>
+            </div>
           </div>
         </div>
 
@@ -526,7 +553,7 @@ export default function DeviceDetailsPage() {
                           type="button"
                           role="radio"
                           aria-checked={auto === m.value}
-                          disabled={rowBusy}
+                          disabled={rowBusy || !meta.canControl}
                           onClick={() => auto !== m.value && toggleActuatorAuto(actKey)}
                           className={
                             "h-9 min-w-[4.5rem] rounded-md px-3 text-sm font-semibold transition " +
@@ -543,7 +570,7 @@ export default function DeviceDetailsPage() {
                     {/* Power */}
                     <Switch
                       checked={isOn}
-                      disabled={rowBusy || auto}
+                      disabled={rowBusy || auto || !meta.canControl}
                       icon={Power}
                       variant="emerald"
                       ariaLabel={`Turn ${actKey} ${isOn ? "off" : "on"}`}
@@ -551,7 +578,9 @@ export default function DeviceDetailsPage() {
                     />
                   </div>
                   <p className="mt-2 min-h-4 text-xs text-zinc-500 dark:text-zinc-400">
-                    {auto ? "Controlled by schedules and automations" : "You control this actuator"}
+                    {!meta.canControl ? (
+                      <span className="inline-flex items-center gap-1"><Eye className="h-3.5 w-3.5" aria-hidden /> View only: you&apos;re a {ROLE_LABELS[meta.role]}</span>
+                    ) : auto ? "Controlled by schedules and automations" : "You control this actuator"}
                   </p>
                 </div>
               );
@@ -569,6 +598,10 @@ export default function DeviceDetailsPage() {
       <Card title="History">
         <TelemetryGraph deviceId={meta.id} />
       </Card>
+
+      {meta.canManage && <DeviceActivity deviceId={meta.id} />}
+
+      <DeviceSharingModal deviceId={meta.id} deviceName={meta.name} open={sharing} onClose={() => setSharing(false)} />
 
       <DeviceCustomizeModal
         device={device}

@@ -231,9 +231,16 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                     condition: flow.condition,
                     deltaThreshold: flow.deltaThreshold,
                     intervalSec: flow.intervalSec,
-                    cooldownSec: flow.cooldownSec
+                    cooldownSec: flow.cooldownSec,
+                    notifyEmail: !!flow.notify?.email
                 }
             });
+
+            // Alert-only rule ("email me if…"): no action node
+            if (!flow.action) {
+                newEdges.push({ id: `e_${sourceId}_${logicId}`, source: sourceId, target: logicId });
+                return;
+            }
 
             // 3. Action Node
             newNodes.push({
@@ -384,8 +391,9 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                 return;
             }
 
-            // 2. Discover all valid paths (Source -> Logic -> Action)
-            const validPaths: { source: Node; logic: Node; action: Node }[] = [];
+            // 2. Discover all valid paths (Source -> Logic -> Action), plus alert-only paths
+            //    (Source -> Logic with "Email me" on and no action connected)
+            const validPaths: { source: Node; logic: Node; action: Node | null }[] = [];
 
             sourceNodes.forEach(source => {
                 const edgesFromSource = currentEdges.filter(e => e.source === source.id);
@@ -395,6 +403,11 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                     if (!logicNode) return;
 
                     const edgesFromLogic = currentEdges.filter(e => e.source === logicNode.id);
+                    const hasAction = edgesFromLogic.some(e => currentNodes.some(n => n.id === e.target && n.type === 'action'));
+                    if (!hasAction && logicNode.data?.notifyEmail) {
+                        validPaths.push({ source, logic: logicNode, action: null });
+                        return;
+                    }
 
                     edgesFromLogic.forEach(edgeToAction => {
                         const actionNode = currentNodes.find(n => n.id === edgeToAction.target && n.type === 'action');
@@ -406,7 +419,7 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
             });
 
             if (validPaths.length === 0) {
-                setDeployStatus({ message: "No complete paths (Source -> Logic -> Action) found.", type: 'info' });
+                setDeployStatus({ message: "No complete rules found. Connect Sensor → Condition → Output, or turn on “Email me” for an alert-only rule.", type: 'info' });
                 setTimeout(() => setDeployStatus(null), 3000);
                 setSaving(false);
                 return;
@@ -422,42 +435,47 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
 
                 // Format for backend with safety fallbacks to avoid 500 errors
                 const metricPath = source.data.metricPath || (source.data.options as string[])?.[0] || "";
-                const actuatorKey = action.data.actuatorKey || (action.data.options as string[])?.[0] || "";
+                const actuatorKey = action ? action.data.actuatorKey || (action.data.options as string[])?.[0] || "" : "";
+                const notifyEmail = !!logic.data?.notifyEmail;
 
-                if (!metricPath || !actuatorKey) {
-                    console.warn(`Skipping incomplete path: ${source.id} -> ${logic.id} -> ${action.id}`);
+                if (!metricPath || (action && !actuatorKey)) {
+                    console.warn(`Skipping incomplete path: ${source.id} -> ${logic.id} -> ${action?.id ?? "(alert only)"}`);
                     completed++;
                     continue;
                 }
 
-                setDeployStatus({ message: `Deploying: ${metricPath} -> ${actuatorKey}`, type: 'loading' });
+                setDeployStatus({ message: `Deploying: ${metricPath} -> ${action ? actuatorKey : "email alert"}`, type: 'loading' });
 
                 // Check for existing _id. If the nodes were loaded from an existing flow, they'll have the same _id.
                 // Priority: Use the _id if it's common between source, logic and action
-                let existingId = source.data?._id === logic.data?._id && logic.data?._id === action.data?._id ? source.data?._id : null;
+                const existingId = source.data?._id === logic.data?._id && (!action || logic.data?._id === action.data?._id) ? source.data?._id : null;
 
                 const flowData = {
                     _id: existingId,
-                    name: `${metricPath} -> ${actuatorKey} Auto`,
+                    name: action ? `${metricPath} -> ${actuatorKey} Auto` : `${metricPath} alert`,
                     deviceId: source.data.deviceId,
                     metricPath: metricPath,
                     condition: logic.data.condition, // Algebraic Operator Logic
                     deltaThreshold: Number(logic.data.deltaThreshold ?? 1.0),
                     intervalSec: Number(logic.data.intervalSec ?? 30),
                     cooldownSec: Number(logic.data.cooldownSec ?? 60),
-                    action: {
-                        deviceId: action.data.deviceId,
-                        actuatorKey: actuatorKey,
-                        setValue: action.data.setValue !== undefined ? action.data.setValue : true
-                    },
+                    // null = alert-only rule (allowed when notify.email is on)
+                    action: action
+                        ? {
+                              deviceId: action.data.deviceId,
+                              actuatorKey: actuatorKey,
+                              setValue: action.data.setValue !== undefined ? action.data.setValue : true
+                          }
+                        : null,
+                    notify: { email: notifyEmail },
                     enabled: true,
                     // Save Graphic Configurations
                     ui_metadata: {
                         sourcePosition: source.position,
                         logicPosition: logic.position,
-                        actionPosition: action.position,
+                        actionPosition: action?.position ?? null,
                         // Store small metadata about the architecture
-                        nodes: [source.id, logic.id, action.id]
+                        nodes: action ? [source.id, logic.id, action.id] : [source.id, logic.id]
                     }
                 };
 
@@ -570,6 +588,7 @@ function CanvasInner({ devices, initialFlows, onSave, onDelete, viewSwitcher }: 
                         </button>
                         <button
                             onClick={handleSave}
+                            aria-label="Deploy flows"
                             disabled={saving}
                             className="h-10 px-4 sm:px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-2 font-bold text-sm whitespace-nowrap"
                         >

@@ -14,6 +14,7 @@ import {
 } from "@/lib/schedule-utils";
 import { cn } from "@/lib/utils";
 import { useProfile } from "@/lib/profile";
+import { canSchedule } from "@/lib/deviceUi";
 import Switch from "@/components/common/Switch";
 import { Calendar } from "lucide-react";
 
@@ -36,6 +37,9 @@ interface Schedule {
     actions: Action[];
     duration_sec: number;
     end_actions: Action[];
+    /** set by the backend when it paused the schedule, e.g. "access removed" */
+    disabledReason?: string | null;
+    user_id?: string;
 }
 
 interface Device {
@@ -49,6 +53,7 @@ interface Device {
     control?: {
         actuators?: Record<string, any>;
     };
+    role?: string;
 }
 
 /* ---------------- Components ---------------- */
@@ -126,6 +131,8 @@ export default function DeviceSchedulesPage() {
     const deviceId = params?.deviceId as string;
 
     const [device, setDevice] = useState<Device | null>(null);
+    // Managers and the owner can add/edit any schedule on the device; others only see them
+    const editable = !device || canSchedule(device);
     const profileTz = useProfile().profile?.preferences.timezone;
     const [schedules, setSchedules] = useState<Schedule[]>([]);
     const [loading, setLoading] = useState(true);
@@ -300,11 +307,19 @@ export default function DeviceSchedulesPage() {
                     <Button onClick={refreshData} disabled={loading}>
                         Refresh
                     </Button>
-                    <Button variant="solid" onClick={handleOpenCreate} disabled={loading || actuatorKeys.length === 0}>
-                        + New Schedule
-                    </Button>
+                    {editable && (
+                        <Button variant="solid" onClick={handleOpenCreate} disabled={loading || actuatorKeys.length === 0}>
+                            + New Schedule
+                        </Button>
+                    )}
                 </div>
             </div>
+
+            {!editable && device && (
+                <div className="p-3 rounded-xl border border-zinc-200 bg-zinc-50 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-300">
+                    You can see this device&apos;s schedules. Only its managers and owner can add or change them.
+                </div>
+            )}
 
             {error ? (
                 <div className="p-4 rounded-xl bg-red-50 text-red-700 border border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800">
@@ -343,6 +358,9 @@ export default function DeviceSchedulesPage() {
                                         {s.name}
                                         {!s.enabled && <span className="text-xs bg-zinc-200 dark:bg-zinc-800 px-2 py-0.5 rounded-full text-zinc-500">Disabled</span>}
                                     </div>
+                                    {!s.enabled && s.disabledReason && (
+                                        <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">Paused: {s.disabledReason}. Turning it back on clears this.</p>
+                                    )}
                                     <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
                                         {describeCron(s.cron)}
                                         <span className="mx-2" aria-hidden>·</span>
@@ -358,13 +376,13 @@ export default function DeviceSchedulesPage() {
                                     </div>
                                 </div>
 
-                                <div className="flex gap-2 shrink-0">
+                                {editable && <div className="flex gap-2 shrink-0">
                                     <Button variant="ghost" className="text-sm" onClick={() => handleToggle(s)}>
                                         {s.enabled ? "Disable" : "Enable"}
                                     </Button>
                                     <Button variant="outline" onClick={() => handleOpenEdit(s)}>Edit</Button>
                                     <Button variant="outline" className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/50" onClick={() => handleDelete(id)}>Delete</Button>
-                                </div>
+                                </div>}
                             </div>
                         </div>
                     )

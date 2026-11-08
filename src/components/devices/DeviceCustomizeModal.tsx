@@ -6,10 +6,13 @@
  * Saved with PATCH /api/devices/:id/ui. Display only: automations, schedules and CSV
  * export still see every value.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { ArrowDown, ArrowUp, Eye, EyeOff, LocateFixed, Pin, PinOff, Radio, Trash2 } from "lucide-react";
-import { apiRequest } from "@/lib/api";
+import { ArrowDown, ArrowUp, BellRing, Eye, EyeOff, LocateFixed, LogOut, Pin, PinOff, Radio, Trash2 } from "lucide-react";
+import Switch from "@/components/common/Switch";
+import { useProfile } from "@/lib/profile";
+import { ApiError, apiRequest } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
     actuatorKeys,
@@ -29,7 +32,7 @@ const LeafletMap = dynamic(() => import("@/components/map/LeafletMap"), {
     loading: () => <div className="grid h-full place-items-center text-sm text-zinc-500">Loading map…</div>,
 });
 
-const SECTIONS = ["Look", "Readings", "Controls", "Location"] as const;
+const SECTIONS = ["Look", "Readings", "Controls", "Location", "Alerts"] as const;
 type Section = (typeof SECTIONS)[number];
 
 export default function DeviceCustomizeModal({
@@ -112,7 +115,7 @@ function CustomizeForm({ device, onClose, onSaved }: { device: any; onClose: () 
                 </>
             }
         >
-            <div role="tablist" aria-label="Settings sections" className="mb-5 grid grid-cols-4 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900">
+            <div role="tablist" aria-label="Settings sections" className="mb-5 grid grid-cols-5 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900">
                 {SECTIONS.map((s) => (
                     <button
                         key={s}
@@ -175,6 +178,10 @@ function CustomizeForm({ device, onClose, onSaved }: { device: any; onClose: () 
             )}
 
             {section === "Location" && <LocationEditor value={location} onChange={setLocation} />}
+
+            {section === "Alerts" && <AlertsEditor deviceId={id} />}
+
+            {section === "Look" && device?.role && device.role !== "owner" && <LeaveDevice deviceId={id} sharedBy={device?.sharedBy?.name || device?.sharedBy?.email} />}
 
             {error && <Notice tone="error" className="mt-4">{error}</Notice>}
         </Modal>
@@ -353,6 +360,132 @@ function LocationEditor({ value, onChange }: { value: DeviceLocation | null; onC
                     />
                 )}
             </Field>
+        </div>
+    );
+}
+
+/* ---------------- Personal offline alerts (saved straight away) ---------------- */
+const DELAYS = [
+    { min: 5, label: "5 minutes" }, { min: 10, label: "10 minutes" }, { min: 15, label: "15 minutes" },
+    { min: 30, label: "30 minutes" }, { min: 60, label: "1 hour" }, { min: 180, label: "3 hours" },
+    { min: 360, label: "6 hours" }, { min: 720, label: "12 hours" }, { min: 1440, label: "24 hours" },
+];
+
+function AlertsEditor({ deviceId }: { deviceId: string }) {
+    const { profile } = useProfile();
+    const [alerts, setAlerts] = useState<{ enabled: boolean; afterMin: number } | null>(null);
+    const [error, setError] = useState("");
+    const [unsupported, setUnsupported] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [saved, setSaved] = useState(false);
+    const url = `/api/devices/${encodeURIComponent(deviceId)}/alerts`;
+    const masterOff = profile?.notifications?.deviceOffline === false;
+
+    useEffect(() => {
+        apiRequest(url, { quiet: true })
+            .then((r: any) => setAlerts(r?.alerts?.offline || { enabled: false, afterMin: 10 }))
+            .catch((e) => {
+                if (e instanceof ApiError && e.status === 404 && !/device/i.test(e.message)) setUnsupported(true);
+                else setError(e.message || "Couldn't load alert settings.");
+            });
+    }, [url]);
+
+    async function save(next: { enabled: boolean; afterMin: number }) {
+        const before = alerts;
+        setAlerts(next);
+        setSaving(true);
+        setSaved(false);
+        setError("");
+        try {
+            const r: any = await apiRequest(url, { method: "PUT", body: { offline: next }, quiet: true });
+            if (r?.alerts?.offline) setAlerts(r.alerts.offline);
+            setSaved(true);
+        } catch (e: any) {
+            setAlerts(before);
+            setError(e.message || "Couldn't save.");
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    if (unsupported) return <Notice tone="warning">Your server doesn&apos;t send alerts yet. Update the backend to use this.</Notice>;
+    if (!alerts) return error ? <Notice tone="error">{error}</Notice> : <div className="h-24 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />;
+
+    const options = DELAYS.some((d) => d.min === alerts.afterMin) ? DELAYS : [...DELAYS, { min: alerts.afterMin, label: `${alerts.afterMin} minutes` }].sort((a, b) => a.min - b.min);
+
+    return (
+        <div className="space-y-4">
+            <p className="text-sm text-zinc-500">Only for you: other people with access choose their own alerts. Changes save straight away.</p>
+            <div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+                <div className="flex items-start gap-3">
+                    <BellRing className="mt-0.5 h-5 w-5 shrink-0 text-zinc-400" />
+                    <div className="min-w-0 flex-1">
+                        <div className="font-medium text-zinc-900 dark:text-white">Email me when it goes offline</div>
+                        <p className="mt-0.5 text-sm text-zinc-500">One email when it stops sending data, and one when it&apos;s back.</p>
+                    </div>
+                    <Switch checked={alerts.enabled} disabled={saving} variant="emerald" ariaLabel="Offline alert emails" onChange={(v) => save({ ...alerts, enabled: v })} />
+                </div>
+                <div className="mt-4 pl-8">
+                    <Field label="After no data for">
+                        {(fid) => (
+                            <select
+                                id={fid}
+                                value={alerts.afterMin}
+                                disabled={!alerts.enabled || saving}
+                                onChange={(e) => save({ ...alerts, afterMin: Number(e.target.value) })}
+                                className="h-11 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900"
+                            >
+                                {options.map((d) => <option key={d.min} value={d.min}>{d.label}</option>)}
+                            </select>
+                        )}
+                    </Field>
+                </div>
+            </div>
+            {masterOff && alerts.enabled && (
+                <Notice tone="warning">Offline alerts are turned off for your whole account in Settings → Alerts, so this won&apos;t email you until you turn that back on.</Notice>
+            )}
+            {saved && !error && <p className="text-xs text-emerald-600 dark:text-emerald-400">Saved.</p>}
+            {error && <Notice tone="error">{error}</Notice>}
+        </div>
+    );
+}
+
+/* ---------------- Leave a device someone shared with me ---------------- */
+function LeaveDevice({ deviceId, sharedBy }: { deviceId: string; sharedBy?: string }) {
+    const router = useRouter();
+    const { profile } = useProfile();
+    const [confirm, setConfirm] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+
+    async function leave() {
+        if (!profile?.id) return setError("Couldn't identify your account. Reload and try again.");
+        setBusy(true);
+        setError("");
+        try {
+            await apiRequest(`/api/devices/${encodeURIComponent(deviceId)}/members/${encodeURIComponent(profile.id)}`, { method: "DELETE", quiet: true });
+            router.replace("/dashboard");
+        } catch (e: any) {
+            setError(e.message || "Couldn't leave the device.");
+            setBusy(false);
+        }
+    }
+
+    return (
+        <div className="mt-8 border-t border-zinc-100 pt-5 dark:border-zinc-800">
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Shared with you{sharedBy ? ` by ${sharedBy}` : ""}</h3>
+            <p className="mt-1 text-sm text-zinc-500">Leaving removes the device from your account and turns off your schedules and automations on it.</p>
+            {confirm ? (
+                <div className="mt-3 flex gap-2">
+                    <Button variant="danger" onClick={leave} loading={busy}>Yes, leave device</Button>
+                    <Button variant="ghost" onClick={() => setConfirm(false)}>Cancel</Button>
+                </div>
+            ) : (
+                <Button variant="danger" className="mt-3" onClick={() => setConfirm(true)}>
+                    <LogOut className="h-4 w-4" /> Leave this device
+                </Button>
+            )}
+            {error && <Notice tone="error" className="mt-3">{error}</Notice>}
         </div>
     );
 }

@@ -10,11 +10,16 @@ export interface AutomationFlow {
         operator: ">" | "<" | ">=" | "<=" | "==" | "!=";
         value: number;
     };
+    /** null for an alert-only rule (needs notify.email) */
     action: {
         deviceId?: string;
         actuatorKey: string;
         setValue: boolean | number | string;
-    };
+    } | null;
+    /** "Email me when this runs" */
+    notify?: { email: boolean };
+    /** set when the backend paused the rule (e.g. access removed) */
+    disabledReason?: string | null;
     cooldownSec: number;
     ui_metadata?: Record<string, any>;
     createdAt: string;

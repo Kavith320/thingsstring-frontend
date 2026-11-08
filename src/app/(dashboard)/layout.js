@@ -5,6 +5,7 @@ import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
 import GlobalAiCopilot from "@/components/common/GlobalAiCopilot";
 import ProtectedClient from "@/components/common/ProtectedClient";
+import VerifyEmailBanner from "@/components/common/VerifyEmailBanner";
 
 export default function DashboardLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -37,6 +38,7 @@ export default function DashboardLayout({ children }) {
         {/* Content */}
         <div className="flex min-w-0 flex-1 flex-col">
           <Topbar onMenuClick={() => setSidebarOpen(true)} />
+          <VerifyEmailBanner />
 
           <main className="w-full min-w-0 px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
             <div className="mx-auto w-full max-w-6xl">{children}</div>

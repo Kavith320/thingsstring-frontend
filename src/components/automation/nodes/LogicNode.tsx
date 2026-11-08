@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Handle, Position, useReactFlow } from "@xyflow/react";
-import { Filter, Clock, Zap, Sparkles } from "lucide-react";
+import { Filter, Clock, Zap, Sparkles, Mail, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function LogicNode({ id, data, selected }: { id: string; data: any; selected?: boolean }) {
@@ -205,6 +205,29 @@ export default function LogicNode({ id, data, selected }: { id: string; data: an
             value {currentOp} {currentVal} ({intervalSec}s / {cooldownSec}s)
           </span>
         </div>
+
+        {/* Email notification: with no action connected this makes an alert-only rule */}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={!!data.notifyEmail}
+          onClick={() => updateNodeData(id, { notifyEmail: !data.notifyEmail })}
+          className={cn(
+            "nodrag w-full flex items-center gap-2 px-3 py-2 rounded-xl border text-left text-xs font-bold transition",
+            data.notifyEmail ? "bg-white text-amber-900 border-white" : "bg-black/20 text-amber-100 border-white/20 hover:bg-black/30"
+          )}
+        >
+          <span className={cn("grid h-5 w-5 place-items-center rounded-md border", data.notifyEmail ? "bg-amber-600 border-amber-600 text-white" : "border-white/40")}>
+            {data.notifyEmail && <Check className="w-3.5 h-3.5" />}
+          </span>
+          <Mail className="w-3.5 h-3.5 opacity-80" />
+          <span className="flex-1">Email me when this runs</span>
+        </button>
+        {data.notifyEmail && (
+          <p className="text-[10px] leading-snug text-amber-100/90">
+            At most one email per 15 min. Leave the output unconnected for an alert-only rule.
+          </p>
+        )}
       </div>
 
       {/* Target & Source Handles */}

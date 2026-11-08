@@ -22,6 +22,7 @@ import {
     ChevronDown,
     WifiOff,
     FolderKanban,
+    Users,
     LayoutGrid,
     GripVertical,
     ChevronLeft,
@@ -42,7 +43,8 @@ import { Button, IconBadge } from "@/components/common/ui";
 import GroupsModal, { type DeviceGroup } from "@/components/dashboard/GroupsModal";
 import { IconRef } from "@/lib/icons";
 import { convertReading, useUnits } from "@/lib/profile";
-import { arrangeEntries, deviceDisplayName, deviceId, deviceOnline, deviceUi, getPath, sensorKeys } from "@/lib/deviceUi";
+import { arrangeEntries, deviceDisplayName, deviceId, deviceOnline, deviceRole, deviceUi, getPath, sensorKeys, ROLE_LABELS, type DeviceRole } from "@/lib/deviceUi";
+import PendingInvites from "@/components/dashboard/PendingInvites";
 import {
     cn,
     formatLastSeen,
@@ -64,6 +66,8 @@ interface Device {
     control?: { actuators?: Record<string, any> } | null;
     ui?: any;
     status?: { online?: boolean; lastSeen?: string | null };
+    role?: string;
+    sharedBy?: { name?: string; email?: string } | null;
 }
 
 /** `icon` is a default icon component; `iconRef` a user-chosen icon reference */
@@ -85,6 +89,9 @@ interface DeviceRow {
     actuators: Actuator[];
     /** every actuator, for the summary counts */
     allActuators: Actuator[];
+    /** who shared it with me (null for my own devices) and my role */
+    sharedBy: string | null;
+    role: DeviceRole;
 }
 
 /* -------- Sensor helpers -------- */
@@ -172,6 +179,8 @@ function toRow(d: Device, units: "metric" | "imperial"): DeviceRow {
         allSensors,
         actuators: (pinnedActs.length ? pinnedActs : visibleActs).map((e) => toActuator(e.key, e.title)),
         allActuators: arranged.map((e) => toActuator(e.key, e.title)),
+        sharedBy: d?.sharedBy ? d.sharedBy.name || d.sharedBy.email || "someone" : null,
+        role: deviceRole(d),
     };
 }
 
@@ -281,7 +290,7 @@ export default function DashboardPage() {
         const isHidden = (id: string) => !!active.cards[id]?.hidden;
         let hiddenCount = 0;
         const grouped = new Set<string>();
-        const out: { key: string; group: DeviceGroup | null; ids: string[]; rows: DeviceRow[] }[] = [];
+        const out: { key: string; group: DeviceGroup | null; title?: string; ids: string[]; rows: DeviceRow[] }[] = [];
         const build = (key: string, group: DeviceGroup | null, ids: string[]) => {
             const ordered = orderIds(ids, active.order[key]);
             const shown = ordered.filter((id) => matching.has(id) && (editing || !isHidden(id)));
@@ -293,8 +302,12 @@ export default function DashboardPage() {
             const sec = build(g.id, g, g.deviceIds.filter((id) => rowById.has(id)));
             if (sec.rows.length || (!query && !editing)) out.push(sec);
         }
-        const rest = build("ungrouped", null, allRows.map((r) => r.id).filter((id) => !grouped.has(id)));
-        if (rest.rows.length) out.push(rest);
+        // Not in a group: my own devices, then the ones other people shared with me
+        const ungrouped = allRows.filter((r) => !grouped.has(r.id));
+        const rest = build("ungrouped", null, ungrouped.filter((r) => !r.sharedBy).map((r) => r.id));
+        if (rest.rows.length) out.push({ ...rest, title: groups.length ? "Other devices" : undefined });
+        const shared = build("shared", null, ungrouped.filter((r) => r.sharedBy).map((r) => r.id));
+        if (shared.rows.length) out.push({ ...shared, title: "Shared with me" });
         return { sections: out, hiddenCount: editing ? 0 : hiddenCount };
     }, [rows, allRows, groups, rowById, query, active, editing]);
 
@@ -351,6 +364,8 @@ export default function DashboardPage() {
                 <StatTile label="Offline" value={firstLoad ? "–" : stats.offline} icon={WifiOff} tone={stats.offline ? "amber" : "neutral"} />
                 <StatTile label="Actuators on" value={firstLoad ? "–" : `${stats.actsOn}/${stats.actsTotal}`} icon={Power} />
             </div>
+
+            <PendingInvites onAccepted={loadDevices} />
 
             {error && (
                 <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
@@ -449,8 +464,11 @@ export default function DashboardPage() {
                             <span className="ml-auto h-px flex-1 bg-zinc-200 dark:bg-zinc-800" aria-hidden />
                             <ChevronDown className={cn("h-4 w-4 shrink-0 text-zinc-400 transition-transform", sec.group.collapsed && "-rotate-90")} />
                         </button>
-                    ) : groups.length > 0 ? (
-                        <h3 id={`sec-${sec.key}`} className="mb-3 text-base font-semibold text-zinc-900 dark:text-white">Other devices <span className="font-normal text-zinc-500">{sec.rows.length}</span></h3>
+                    ) : sec.title ? (
+                        <h3 id={`sec-${sec.key}`} className="mb-3 flex items-center gap-2 text-base font-semibold text-zinc-900 dark:text-white">
+                            {sec.key === "shared" && <Users className="h-4 w-4 text-indigo-500" aria-hidden />}
+                            {sec.title} <span className="font-normal text-zinc-500">{sec.rows.length}</span>
+                        </h3>
                     ) : null}
                     {(!sec.group?.collapsed || editing) && (
                         <div className={cn("grid grid-cols-2 md:grid-cols-2 gap-3 sm:gap-4 items-start", GRID_COLS[active.columns])}>
@@ -563,6 +581,10 @@ function DeviceCard({ dev, size = "m", edit }: { dev: DeviceRow; size?: CardSize
                         <p className="mt-0.5 flex items-center gap-1 text-xs text-zinc-500">
                             <span className={cn("h-1.5 w-1.5 rounded-full", dev.online ? "bg-emerald-500" : "bg-zinc-400")} />
                             {dev.online ? "Online" : "Offline"}
+                        </p>
+                    ) : dev.sharedBy ? (
+                        <p className="mt-0.5 truncate text-xs text-indigo-600 dark:text-indigo-400" title={`Shared by ${dev.sharedBy}`}>
+                            Shared by {dev.sharedBy} · {ROLE_LABELS[dev.role]}
                         </p>
                     ) : (
                         <p className="mt-0.5 truncate font-mono text-xs text-zinc-500 dark:text-zinc-400">{dev.model} · {dev.id}</p>

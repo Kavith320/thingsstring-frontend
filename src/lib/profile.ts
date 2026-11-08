@@ -32,6 +32,8 @@ export interface Profile {
     bio: string | null;
     avatar: string | null;
     preferences: Preferences;
+    /** alert email settings (backends with email support) */
+    notifications?: { deviceOffline: boolean; automation: boolean };
     createdAt?: string;
 }
 

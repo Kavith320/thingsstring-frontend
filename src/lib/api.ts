@@ -2,6 +2,21 @@ import { getToken, clearAuth } from "@/lib/auth/storage";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
+/**
+ * The server answered with an error. `code` is the backend's machine-readable reason when it
+ * sends one, e.g. "EMAIL_NOT_VERIFIED" or "DEVICE_ROLE_TOO_LOW".
+ */
+export class ApiError extends Error {
+    status: number;
+    code?: string;
+    constructor(message: string, status: number, code?: string) {
+        super(message);
+        this.name = "ApiError";
+        this.status = status;
+        this.code = code;
+    }
+}
+
 /** No HTTP response at all (as opposed to an error status from the server). */
 export class NetworkError extends Error {
     constructor(message: string) {
@@ -79,7 +94,7 @@ export async function apiRequest<T = any>(
             msg = data;
         }
         if (!quiet) console.error(`API Error (${res.status}):`, msg);
-        throw new Error(msg);
+        throw new ApiError(msg, res.status, typeof data === "object" && data ? data.code : undefined);
     }
 
     return data as T;

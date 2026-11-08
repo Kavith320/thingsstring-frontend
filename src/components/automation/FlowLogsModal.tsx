@@ -15,6 +15,8 @@ interface FlowLog {
     previousValue: number;
     delta: number;
     action?: any;
+    /** true when the rule emailed its owner */
+    emailed?: boolean;
 }
 
 interface FlowLogsModalProps {
@@ -140,6 +142,11 @@ export default function FlowLogsModal({ flowId, onClose }: FlowLogsModalProps) {
                                         <div className="flex items-center gap-2 mt-3 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 w-fit px-2 py-1 rounded-md">
                                             <ArrowDown className="w-3 h-3" />
                                             SET {log.action.actuatorKey} = {String(log.action.setValue).toUpperCase()}
+                                        </div>
+                                    )}
+                                    {log.emailed && (
+                                        <div className="mt-2 w-fit rounded-md bg-indigo-500/10 px-2 py-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                                            Emailed you
                                         </div>
                                     )}
                                 </div>

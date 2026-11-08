@@ -132,3 +132,33 @@ export function sensorKeys(t: any): string[] {
 export function actuatorKeys(d: any): string[] {
     return [...new Set([...Object.keys(d?.control?.actuators || {}), ...Object.keys(d?.config?.actuators || {})])];
 }
+
+/* -------- Sharing roles (backend SHARING_FRONTEND_GUIDE.md §1) -------- */
+export type DeviceRole = "viewer" | "operator" | "manager" | "owner";
+const ROLE_RANK: Record<DeviceRole, number> = { viewer: 0, operator: 1, manager: 2, owner: 3 };
+
+export const ROLE_LABELS: Record<DeviceRole, string> = { viewer: "Viewer", operator: "Operator", manager: "Manager", owner: "Owner" };
+export const ROLE_HELP: Record<Exclude<DeviceRole, "owner">, string> = {
+    viewer: "Sees live data, graphs and the map",
+    operator: "Viewer, plus switches outputs on and off",
+    manager: "Operator, plus schedules, automations, sharing and history",
+};
+
+/** The signed-in user's role on a device. Older backends don't send one: they only list owned devices. */
+export function deviceRole(d: any): DeviceRole {
+    const r = d?.role;
+    return r === "viewer" || r === "operator" || r === "manager" || r === "owner" ? r : "owner";
+}
+
+export function roleAtLeast(d: any, min: DeviceRole): boolean {
+    return ROLE_RANK[deviceRole(d)] >= ROLE_RANK[min];
+}
+
+export const canControl = (d: any) => roleAtLeast(d, "operator");
+export const canSchedule = (d: any) => roleAtLeast(d, "manager");
+export const canManageSharing = (d: any) => roleAtLeast(d, "manager");
+export const isOwner = (d: any) => deviceRole(d) === "owner";
+/** Who shared the device with me (null for my own devices). */
+export function sharedBy(d: any): { name?: string; email?: string } | null {
+    return d?.sharedBy || null;
+}

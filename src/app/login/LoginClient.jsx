@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import Script from "next/script";
 import dynamic from "next/dynamic";
 import { Mail, Lock, Eye, EyeOff, User } from "lucide-react";
@@ -159,9 +160,16 @@ export default function LoginClient() {
 
             {/* Password */}
             <div className="mt-4">
-              <label className="block text-xs sm:text-sm font-medium text-gray-200">
-                Password
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="block text-xs sm:text-sm font-medium text-gray-200">
+                  Password
+                </label>
+                {!isRegister && (
+                  <Link href="/forgot-password" className="text-xs sm:text-sm text-gray-400 hover:text-white">
+                    Forgot password?
+                  </Link>
+                )}
+              </div>
 
               <div className="mt-2 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/35 px-4 py-2.5 focus-within:ring-2 focus-within:ring-white/10">
                 <Lock className="h-4 w-4 text-gray-400 shrink-0" />

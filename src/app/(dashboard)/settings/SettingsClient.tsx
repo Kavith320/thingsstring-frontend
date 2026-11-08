@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Lock, Monitor, Moon, Palette, Sun, Trash2, User } from "lucide-react";
+import { Bell, BadgeCheck, Camera, Lock, MailWarning, Monitor, Moon, Palette, Sun, Trash2, User } from "lucide-react";
+import Switch from "@/components/common/Switch";
+import { ApiError } from "@/lib/api";
 import { apiRequest, apiUpload } from "@/lib/api";
 import { setAuth } from "@/lib/auth/storage";
 import { resizeImage } from "@/lib/image";
@@ -15,6 +17,7 @@ const TABS = [
     { id: "profile", label: "Profile", icon: User },
     { id: "security", label: "Password", icon: Lock },
     { id: "preferences", label: "Preferences", icon: Palette },
+    { id: "notifications", label: "Alerts", icon: Bell },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
@@ -39,7 +42,7 @@ export default function SettingsClient() {
             )}
             {error && <Notice tone="error">{error}</Notice>}
 
-            <div role="tablist" aria-label="Settings sections" className="grid grid-cols-3 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900">
+            <div role="tablist" aria-label="Settings sections" className="grid grid-cols-2 sm:grid-cols-4 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900">
                 {TABS.map((t) => (
                     <button
                         key={t.id}
@@ -69,8 +72,10 @@ export default function SettingsClient() {
                     <ProfileTab profile={profile} disabled={!supported} />
                 ) : tab === "security" ? (
                     <PasswordTab profile={profile} disabled={!supported} />
-                ) : (
+                ) : tab === "preferences" ? (
                     <PreferencesTab preferences={profile?.preferences || DEFAULT_PREFERENCES} supported={supported} />
+                ) : (
+                    <NotificationsTab profile={profile} supported={supported} />
                 )}
             </section>
         </div>
@@ -197,7 +202,7 @@ function ProfileTab({ profile, disabled }: { profile: Profile | null; disabled: 
                 <h3 className="text-base font-semibold text-zinc-900 dark:text-white">Details</h3>
                 <div className="grid gap-4 sm:grid-cols-2">
                     <Field label="Name">{(id) => <Input id={id} value={form.name} onChange={set("name")} maxLength={60} autoComplete="name" disabled={disabled} required />}</Field>
-                    <Field label="Email" hint="Your sign-in email can't be changed here.">{(id) => <Input id={id} value={profile?.email || ""} disabled readOnly />}</Field>
+                    <EmailField profile={profile} disabled={disabled} />
                     <Field label="Phone">{(id) => <Input id={id} value={form.phone} onChange={set("phone")} maxLength={30} inputMode="tel" autoComplete="tel" disabled={disabled} placeholder="+94 77 123 4567" />}</Field>
                     <Field label="Organisation">{(id) => <Input id={id} value={form.organization} onChange={set("organization")} maxLength={100} autoComplete="organization" disabled={disabled} />}</Field>
                     <Field label="Country">{(id) => <Input id={id} value={form.country} onChange={set("country")} maxLength={60} autoComplete="country-name" disabled={disabled} />}</Field>
@@ -359,6 +364,133 @@ function PreferencesTab({ preferences, supported }: { preferences: Preferences; 
                     )}
                 </Field>
             </div>
+            {status && <Notice tone={status.tone}>{status.text}</Notice>}
+        </div>
+    );
+}
+
+/* ---------------- Email (with verification state and change flow) ---------------- */
+function EmailField({ profile, disabled }: { profile: Profile | null; disabled: boolean }) {
+    const [open, setOpen] = useState(false);
+    const [newEmail, setNewEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [status, setStatus] = useState<Status>(null);
+    const verified = profile?.emailVerified;
+    const needsPassword = profile?.hasPassword === false;
+
+    async function submit() {
+        if (!/^\S+@\S+\.\S+$/.test(newEmail.trim())) return setStatus({ tone: "error", text: "Enter a valid email address." });
+        setBusy(true);
+        setStatus(null);
+        try {
+            const r: any = await apiRequest("/api/me/email", { method: "POST", body: { newEmail: newEmail.trim(), currentPassword: password } });
+            setStatus({ tone: "success", text: `${r?.message || "Confirmation link sent"}. Your email changes when you open that link.` });
+            setPassword("");
+        } catch (e: any) {
+            setStatus({
+                tone: "error",
+                text: e instanceof ApiError && e.status === 404 ? "Your server doesn't support changing email yet." : e.message || "Couldn't start the change.",
+            });
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    return (
+        <div>
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Email</span>
+                {verified === true && <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400"><BadgeCheck className="h-3.5 w-3.5" /> Verified</span>}
+                {verified === false && <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400"><MailWarning className="h-3.5 w-3.5" /> Not verified</span>}
+            </div>
+            <div className="flex gap-2">
+                <Input value={profile?.email || ""} disabled readOnly aria-label="Current email" className="min-w-0 flex-1" />
+                {!open && <Button onClick={() => setOpen(true)} disabled={disabled}>Change</Button>}
+            </div>
+            {open && (
+                <div className="mt-3 space-y-3 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+                    {needsPassword ? (
+                        <Notice tone="warning">You sign in with Google. Set a password on the Password tab first, then come back to change your email.</Notice>
+                    ) : (
+                        <>
+                            <Field label="New email">{(id) => <Input id={id} type="email" autoComplete="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />}</Field>
+                            <Field label="Current password">{(id) => <Input id={id} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />}</Field>
+                            <p className="text-xs text-zinc-500">We&apos;ll send a link to the new address. Nothing changes until you open it.</p>
+                        </>
+                    )}
+                    {status && <Notice tone={status.tone}>{status.text}</Notice>}
+                    <div className="flex justify-end gap-2">
+                        <Button variant="ghost" onClick={() => { setOpen(false); setStatus(null); }}>Close</Button>
+                        {!needsPassword && <Button variant="primary" onClick={submit} loading={busy} disabled={!newEmail || !password}>Send link</Button>}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/* ---------------- Notifications ---------------- */
+function NotificationsTab({ profile, supported }: { profile: Profile | null; supported: boolean }) {
+    const [prefs, setPrefs] = useState(profile?.notifications || null);
+    const [available, setAvailable] = useState(supported);
+    const [saving, setSaving] = useState<string | null>(null);
+    const [status, setStatus] = useState<Status>(null);
+
+    useEffect(() => {
+        if (prefs || !supported) return;
+        apiRequest("/api/me/notifications", { quiet: true })
+            .then((r: any) => setPrefs(r.notifications))
+            .catch((e) => {
+                if (e instanceof ApiError && e.status === 404) setAvailable(false);
+                else setStatus({ tone: "error", text: e.message || "Couldn't load your alert settings." });
+            });
+    }, [prefs, supported]);
+
+    async function toggle(key: "deviceOffline" | "automation", value: boolean) {
+        const before = prefs;
+        setPrefs((p) => (p ? { ...p, [key]: value } : p));
+        setSaving(key);
+        setStatus(null);
+        try {
+            const r: any = await apiRequest("/api/me/notifications", { method: "PATCH", body: { [key]: value } });
+            if (r?.notifications) setPrefs(r.notifications);
+        } catch (e: any) {
+            setPrefs(before);
+            setStatus({ tone: "error", text: e.message || "Couldn't save." });
+        } finally {
+            setSaving(null);
+        }
+    }
+
+    if (!available) return <Notice tone="warning">Your server doesn&apos;t send alert emails yet. Update the backend to use these settings.</Notice>;
+
+    const rows: { key: "deviceOffline" | "automation"; title: string; text: string }[] = [
+        { key: "deviceOffline", title: "Device offline alerts", text: "Master switch. Choose which devices alert you, and after how long, in each device's Customise → Alerts." },
+        { key: "automation", title: "Automation emails", text: "Emails from automation rules that have “Email me when this runs” turned on." },
+    ];
+
+    return (
+        <div className="space-y-6">
+            <div>
+                <h3 className="text-base font-semibold text-zinc-900 dark:text-white">Alert emails</h3>
+                <p className="mt-1 text-sm text-zinc-500">Security emails (password or email changes) are always sent.</p>
+            </div>
+            {!prefs ? (
+                <div className="h-28 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />
+            ) : (
+                <ul className="divide-y divide-zinc-100 rounded-xl border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+                    {rows.map((r) => (
+                        <li key={r.key} className="flex items-start gap-4 p-4">
+                            <div className="min-w-0 flex-1">
+                                <div className="font-medium text-zinc-900 dark:text-white">{r.title}</div>
+                                <p className="mt-0.5 text-sm text-zinc-500">{r.text}</p>
+                            </div>
+                            <Switch checked={!!prefs[r.key]} disabled={saving === r.key} variant="emerald" ariaLabel={r.title} onChange={(v) => toggle(r.key, v)} />
+                        </li>
+                    ))}
+                </ul>
+            )}
             {status && <Notice tone={status.tone}>{status.text}</Notice>}
         </div>
     );
