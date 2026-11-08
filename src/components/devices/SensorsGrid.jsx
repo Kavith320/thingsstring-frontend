@@ -32,30 +32,11 @@ import {
   FlaskConical,
 
 } from "lucide-react";
-import { humanizeKey } from "@/lib/utils";
+import { arrangeEntries, getPath, sensorKeys } from "@/lib/deviceUi";
+import { convertReading, useUnits } from "@/lib/profile";
+import { IconBadge } from "@/components/common/ui";
 
-/* ------------------ ALWAYS IGNORE THESE KEYS ------------------ */
-const IGNORE_KEYS = new Set([
-  "_id",
-  "id",
-  "uid",
-  "uuid",
-  "deviceId",
-  "device_id",
-  "chipId",
-  "chip_id",
-  "__v",
-  "ts",
-  "timestamp",
-  "createdAt",
-  "updatedAt",
-  "time",
-  "date",
-  "meta",
-  "raw",
-  "up",
-  "actuators", // you already show actuators elsewhere
-]);
+/* Which telemetry fields count as readings: see sensorKeys() in lib/deviceUi */
 
 /* ------------------ keyword -> icon mapping ------------------ */
 /**
@@ -295,10 +276,6 @@ function pickSensorMeta(key) {
   return { icon: Eye, unit: "", tone: "neutral" };
 }
 
-function isScalar(v) {
-  return v == null || ["string", "number", "boolean"].includes(typeof v);
-}
-
 function formatValue(v) {
   if (v == null) return "-";
   if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
@@ -359,56 +336,57 @@ function toneClasses(tone) {
 
 /* ------------------ component ------------------ */
 
-export default function SensorsGrid({ lastTelemetry }) {
+export default function SensorsGrid({ lastTelemetry, ui }) {
   const t = lastTelemetry && typeof lastTelemetry === "object" ? lastTelemetry : null;
+  const units = useUnits();
 
-  // build sensor entries
-  const entries = (() => {
-    if (!t) return [];
-
-    return Object.entries(t)
-      .filter(([k]) => !IGNORE_KEYS.has(k))
-      .filter(([k]) => !IGNORE_KEYS.has(normalizeKey(k)))
-      .filter(([, v]) => isScalar(v)) // only scalars
-      .sort(([a], [b]) => normalizeKey(a).localeCompare(normalizeKey(b)));
-  })();
+  // Readings in the user's saved order, hidden ones left out; new fields follow at the end
+  const entries = arrangeEntries(sensorKeys(t), ui?.sensors).filter((e) => e.visible);
 
   if (!entries.length) {
     return (
       <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-300">
-        No sensor data yet. Send telemetry from the device to see values here.
+        {t ? "All readings are hidden. Use Customise to show them." : "No sensor data yet. Send telemetry from the device to see values here."}
       </div>
     );
   }
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3">
-      {entries.map(([k, v]) => {
-        const meta = pickSensorMeta(k);
+      {entries.map((entry) => {
+        const k = entry.key;
+        const raw = getPath(t, k);
+        const meta = pickSensorMeta(k.split(".").pop());
         const Icon = meta.icon || Eye;
-        const valueText = formatValue(v);
-        const label = humanizeKey(k);
+        const baseUnit = entry.unit || meta.unit || "";
+        const conv = typeof raw === "number" ? convertReading(raw, baseUnit, units) : { value: raw, unit: baseUnit };
+        const valueText = formatValue(conv.value);
+        const label = entry.title;
         const accent = toneClasses(meta.tone);
 
         return (
           <div
             key={k}
-            title={`${label} (key: ${normalizeKey(k)})`}
+            title={`${label} (key: ${k})`}
             className="min-w-0 rounded-xl border border-zinc-200 bg-white p-3 sm:p-4 dark:border-zinc-800 dark:bg-zinc-950/30"
           >
             <div className="flex items-center gap-2">
-              <div className={`shrink-0 rounded-lg border p-1.5 ${accent}`}>
-                <Icon className="h-4 w-4" />
-              </div>
+              {entry.icon ? (
+                <IconBadge icon={entry.icon} color={entry.color} size="sm" />
+              ) : (
+                <div className={`shrink-0 rounded-lg border p-1.5 ${accent}`}>
+                  <Icon className="h-4 w-4" />
+                </div>
+              )}
               <div className="min-w-0 text-xs font-medium leading-tight text-zinc-500 dark:text-zinc-400 line-clamp-2 break-words">
                 {label}
               </div>
             </div>
             <div className="mt-2.5 truncate whitespace-nowrap text-xl font-semibold text-zinc-900 dark:text-zinc-100">
               {valueText}
-              {meta.unit && typeof v === "number" ? (
+              {conv.unit && typeof raw === "number" ? (
                 <span className="ml-1 text-sm font-medium text-zinc-500 dark:text-zinc-400">
-                  {meta.unit}
+                  {conv.unit}
                 </span>
               ) : null}
             </div>

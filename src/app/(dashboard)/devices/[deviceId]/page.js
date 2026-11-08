@@ -3,15 +3,18 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import { apiRequest, apiDownload } from "../../../../lib/api";
-import { formatLastSeen, isActuatorAuto, humanizeKey, DEVICE_OFFLINE_MS } from "@/lib/utils";
+import { formatLastSeen, isActuatorAuto, DEVICE_OFFLINE_MS } from "@/lib/utils";
 import Link from "next/link";
 import StatusPill from "@/components/common/StatusPill";
+import { IconBadge } from "@/components/common/ui";
+import DeviceCustomizeModal from "@/components/devices/DeviceCustomizeModal";
+import { arrangeEntries, deviceDisplayName, deviceOnline, deviceUi } from "@/lib/deviceUi";
 
 import TelemetryGraph from "@/components/devices/TelemetryGraph";
 import SensorsGrid from "@/components/devices/SensorsGrid";
 import LoadingSignal from "@/components/LoadingSignal";
 import Switch from "@/components/common/Switch";
-import { Power, Download, ChevronDown, CalendarClock, RefreshCw } from "lucide-react";
+import { Power, Download, ChevronDown, CalendarClock, RefreshCw, SlidersHorizontal, Radio } from "lucide-react";
 
 /* ---------------- helpers: time + online ---------------- */
 
@@ -200,6 +203,7 @@ export default function DeviceDetailsPage() {
 
   const [msg, setMsg] = useState("");
   const [busyAct, setBusyAct] = useState("");
+  const [customizing, setCustomizing] = useState(false);
   // Read inside the poller so a busy toggle doesn't restart polling
   const busyActRef = useRef("");
   busyActRef.current = busyAct;
@@ -256,17 +260,22 @@ export default function DeviceDetailsPage() {
     const control = device?.control || {};
     const last = device?.last_telemetry || {};
     const st = getOnlineInfo(device);
+    const ui = deviceUi(device);
+    const controlActuators = control?.actuators || {};
 
     return {
       id: device?.deviceId || dev?.device_id || deviceId,
-      name: dev?.name || dev?.model || deviceId,
+      name: device ? deviceDisplayName(device) : deviceId,
+      ui,
+      // Saved order/labels first; hidden controls are left out (they still run from schedules)
+      actuatorEntries: arrangeEntries(Object.keys(controlActuators), ui.actuators).filter((e) => e.visible),
       model: dev?.model || "-",
       firmware: dev?.firmware || "-",
       cfgActuators: cfg?.actuators || {},
       controlActuators: control?.actuators || {},
       telemetryActuators: last?.actuators || {},
       lastTelemetry: last,
-      online: st.online,
+      online: device ? deviceOnline(device) : st.online,
       lastSeenMs: st.lastSeenMs,
       ageMs: st.ageMs,
     };
@@ -384,7 +393,7 @@ export default function DeviceDetailsPage() {
     ? formatLastSeen(meta.lastSeenMs)
     : null;
 
-  const actuatorCount = Object.keys(meta.controlActuators || {}).length;
+  const actuatorCount = meta.actuatorEntries.length;
 
   const msgTone = /^❌/.test(msg) ? "red" : /^⚠️/.test(msg) ? "amber" : "green";
   const msgText = msg.replace(/^(❌|⚠️|✅)\s*/u, "");
@@ -402,11 +411,15 @@ export default function DeviceDetailsPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex items-start gap-3">
+              <IconBadge icon={meta.ui.icon} color={meta.ui.color} fallback={Radio} size="lg" className="hidden sm:grid" />
               <h2 className="min-w-0 flex-1 text-xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-white break-words">
                 {meta.name}
               </h2>
               <StatusPill online={meta.online} className="mt-1 sm:mt-2" />
             </div>
+            {meta.ui.description && (
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{meta.ui.description}</p>
+            )}
             <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-zinc-500 dark:text-zinc-400">
               <span className="font-mono text-xs rounded-md bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">{meta.id}</span>
               <span aria-hidden>·</span>
@@ -427,6 +440,16 @@ export default function DeviceDetailsPage() {
               Schedules
             </Link>
             <CsvExportButton deviceId={meta.id} onMessage={setMsg} />
+            <button
+              type="button"
+              onClick={() => setCustomizing(true)}
+              aria-label="Display settings"
+              title="Name, icon, colour, readings and location"
+              className="inline-flex h-11 w-11 sm:w-auto shrink-0 items-center justify-center gap-2 rounded-xl border border-zinc-200 sm:px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 transition"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              <span className="hidden sm:inline">Customise</span>
+            </button>
             <button
               type="button"
               onClick={loadDeviceOnce}
@@ -463,7 +486,8 @@ export default function DeviceDetailsPage() {
           right={<span className="text-xs text-zinc-500 dark:text-zinc-400">{actuatorCount} actuator{actuatorCount > 1 ? "s" : ""}</span>}
         >
           <div className="grid gap-3 md:grid-cols-2">
-            {Object.entries(meta.controlActuators).map(([actKey, act]) => {
+            {meta.actuatorEntries.map(({ key: actKey, title }) => {
+              const act = meta.controlActuators[actKey];
               const type = act?.type || meta.cfgActuators?.[actKey]?.type;
               const auto = getActAuto(act);
               const liveState = getActLiveState(actKey, meta.telemetryActuators, act);
@@ -484,7 +508,7 @@ export default function DeviceDetailsPage() {
 
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="truncate font-semibold text-zinc-900 dark:text-white">{humanizeKey(actKey)}</div>
+                      <div className="truncate font-semibold text-zinc-900 dark:text-white">{title}</div>
                       <div className="text-xs text-zinc-500">{type ? `${type} · ` : ""}<span className="font-mono">{actKey}</span></div>
                     </div>
                     <StateBadge state={liveState} />
@@ -538,13 +562,23 @@ export default function DeviceDetailsPage() {
 
       {/* Sensors */}
       <Card title="Latest readings">
-        <SensorsGrid lastTelemetry={device?.last_telemetry} />
+        <SensorsGrid lastTelemetry={device?.last_telemetry} ui={meta.ui} />
       </Card>
 
       {/* Graphs */}
       <Card title="History">
         <TelemetryGraph deviceId={meta.id} />
       </Card>
+
+      <DeviceCustomizeModal
+        device={device}
+        open={customizing}
+        onClose={() => setCustomizing(false)}
+        onSaved={(ui) => {
+          setDevice((prev) => (prev ? { ...prev, ui } : prev));
+          setMsg("✅ Display settings saved.");
+        }}
+      />
     </div>
   );
 }

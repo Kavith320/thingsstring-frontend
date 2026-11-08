@@ -1,358 +1,365 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import {
-    User,
-    Lock,
-    Bell,
-    Palette,
-    Globe,
-    Key,
-    Shield,
-    Save,
-    Trash2,
-    LogOut,
-    Languages,
-    Clock,
-    Eye,
-    EyeOff,
-    Monitor,
-    Sun,
-    Moon,
-    Activity,
-    Cpu,
-    Zap
-} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Camera, Lock, Monitor, Moon, Palette, Sun, Trash2, User } from "lucide-react";
+import { apiRequest, apiUpload } from "@/lib/api";
+import { setAuth } from "@/lib/auth/storage";
+import { resizeImage } from "@/lib/image";
+import { AVATAR_NAMES, Avatar } from "@/lib/icons";
+import { applyTheme, type ThemePref } from "@/lib/theme";
+import { DEFAULT_PREFERENCES, setPreferences, setProfile, useProfile, type Preferences, type Profile } from "@/lib/profile";
 import { cn } from "@/lib/utils";
-import { getUser } from "@/lib/auth";
+import { Button, Field, Input, Notice, Select, Textarea } from "@/components/common/ui";
 
 const TABS = [
     { id: "profile", label: "Profile", icon: User },
-    { id: "security", label: "Security", icon: Lock },
-    { id: "notifications", label: "Notifications", icon: Bell },
+    { id: "security", label: "Password", icon: Lock },
     { id: "preferences", label: "Preferences", icon: Palette },
-];
+] as const;
+type TabId = (typeof TABS)[number]["id"];
+
+type Status = { tone: "success" | "error"; text: string } | null;
 
 export default function SettingsClient() {
-    const [activeTab, setActiveTab] = useState("profile");
-    const [user, setUser] = useState<any>(null);
-    const [isSaving, setIsSaving] = useState(false);
-    const [showApiKey, setShowApiKey] = useState(false);
-    const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
-
-    useEffect(() => {
-        setUser(getUser());
-        const savedTheme = localStorage.getItem("theme") as any;
-        if (savedTheme) {
-            setTheme(savedTheme);
-        }
-    }, []);
-
-    const handleThemeChange = (newTheme: "light" | "dark" | "system") => {
-        setTheme(newTheme);
-        localStorage.setItem("theme", newTheme);
-
-        if (newTheme === "system") {
-            const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-            document.documentElement.classList.toggle("dark", isDark);
-        } else {
-            document.documentElement.classList.toggle("dark", newTheme === "dark");
-        }
-    };
-
-    const handleSave = () => {
-        setIsSaving(true);
-        setTimeout(() => {
-            setIsSaving(false);
-        }, 1200);
-    };
+    const { profile, loading, supported, error } = useProfile();
+    const [tab, setTab] = useState<TabId>("profile");
 
     return (
-        <div className="space-y-6 max-w-5xl mx-auto pb-12 animate-in fade-in duration-500">
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-                <div>
-                    <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">Settings</h2>
-                    <p className="text-zinc-500 dark:text-zinc-400 mt-2 font-medium">
-                        Configure your ThingsString workspace and personal preferences.
-                    </p>
-                </div>
-
-                <button
-                    onClick={handleSave}
-                    disabled={isSaving}
-                    className="flex items-center gap-2 bg-black dark:bg-white text-white dark:text-black px-6 py-3 rounded-2xl text-sm font-bold hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-black/5 dark:shadow-white/5 disabled:opacity-50"
-                >
-                    {isSaving ? (
-                        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                        <Save className="w-4 h-4" />
-                    )}
-                    {isSaving ? "Saving..." : "Save Changes"}
-                </button>
+        <div className="mx-auto max-w-3xl space-y-6">
+            <div>
+                <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">Settings</h2>
+                <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Your profile, password and app preferences</p>
             </div>
 
-            <div className="space-y-8 mt-8">
-                {/* Horizontal Tabs at the top */}
-                <div role="tablist" className="grid grid-cols-2 gap-1 p-1 sm:flex sm:w-fit sm:max-w-full sm:overflow-x-auto bg-zinc-100/50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
-                    {TABS.map((tab) => {
-                        const Icon = tab.icon;
-                        const active = activeTab === tab.id;
+            {!supported && (
+                <Notice tone="warning">
+                    Your server doesn&apos;t support profile settings yet. Update the backend to edit your profile and password.
+                    The theme below still works on this device.
+                </Notice>
+            )}
+            {error && <Notice tone="error">{error}</Notice>}
+
+            <div role="tablist" aria-label="Settings sections" className="grid grid-cols-3 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900">
+                {TABS.map((t) => (
+                    <button
+                        key={t.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === t.id}
+                        onClick={() => setTab(t.id)}
+                        className={cn(
+                            "flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-semibold transition",
+                            tab === t.id ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-white" : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200"
+                        )}
+                    >
+                        <t.icon className="hidden h-4 w-4 sm:block" />
+                        {t.label}
+                    </button>
+                ))}
+            </div>
+
+            <section className="rounded-2xl border border-zinc-200 bg-white p-4 sm:p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
+                {loading && !profile ? (
+                    <div className="space-y-3" aria-hidden>
+                        <div className="h-20 w-20 animate-pulse rounded-full bg-zinc-100 dark:bg-zinc-800" />
+                        <div className="h-11 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />
+                        <div className="h-11 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />
+                    </div>
+                ) : tab === "profile" ? (
+                    <ProfileTab profile={profile} disabled={!supported} />
+                ) : tab === "security" ? (
+                    <PasswordTab profile={profile} disabled={!supported} />
+                ) : (
+                    <PreferencesTab preferences={profile?.preferences || DEFAULT_PREFERENCES} supported={supported} />
+                )}
+            </section>
+        </div>
+    );
+}
+
+/* ---------------- Profile ---------------- */
+function ProfileTab({ profile, disabled }: { profile: Profile | null; disabled: boolean }) {
+    const [form, setForm] = useState(() => ({
+        name: profile?.name || "",
+        phone: profile?.phone || "",
+        organization: profile?.organization || "",
+        country: profile?.country || "",
+        bio: profile?.bio || "",
+    }));
+    const [saving, setSaving] = useState(false);
+    const [status, setStatus] = useState<Status>(null);
+    const [avatarBusy, setAvatarBusy] = useState(false);
+    const [avatarStatus, setAvatarStatus] = useState<Status>(null);
+    const fileRef = useRef<HTMLInputElement>(null);
+
+    const dirty = useMemo(
+        () => !!profile && (["name", "phone", "organization", "country", "bio"] as const).some((k) => (form[k] || "") !== (profile[k] || "")),
+        [form, profile]
+    );
+
+    async function save(e: React.FormEvent) {
+        e.preventDefault();
+        if (!form.name.trim()) return setStatus({ tone: "error", text: "Please enter your name." });
+        setSaving(true);
+        setStatus(null);
+        try {
+            const r: any = await apiRequest("/api/me", { method: "PATCH", body: { ...form, name: form.name.trim() } });
+            setProfile(r.user);
+            setStatus({ tone: "success", text: "Profile saved." });
+        } catch (err: any) {
+            setStatus({ tone: "error", text: err.message || "Couldn't save your profile." });
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    async function chooseAvatar(ref: string | null) {
+        setAvatarBusy(true);
+        setAvatarStatus(null);
+        try {
+            const r: any = ref === null && profile?.avatar?.startsWith("file:")
+                ? await apiRequest("/api/me/avatar", { method: "DELETE" })
+                : await apiRequest("/api/me", { method: "PATCH", body: { avatar: ref } });
+            setProfile(r.user);
+        } catch (err: any) {
+            setAvatarStatus({ tone: "error", text: err.message || "Couldn't change your picture." });
+        } finally {
+            setAvatarBusy(false);
+        }
+    }
+
+    async function uploadAvatar(file: File) {
+        setAvatarBusy(true);
+        setAvatarStatus(null);
+        try {
+            const blob = await resizeImage(file, 256, { square: true });
+            const r: any = await apiUpload("/api/me/avatar", blob, "PUT");
+            setProfile(r.user);
+            setAvatarStatus({ tone: "success", text: "Photo updated." });
+        } catch (err: any) {
+            setAvatarStatus({ tone: "error", text: err.message || "Upload failed." });
+        } finally {
+            setAvatarBusy(false);
+            if (fileRef.current) fileRef.current.value = "";
+        }
+    }
+
+    const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+    return (
+        <div className="space-y-8">
+            {/* Avatar */}
+            <div>
+                <h3 className="text-base font-semibold text-zinc-900 dark:text-white">Picture</h3>
+                <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-center">
+                    <div className="relative w-fit">
+                        <Avatar value={profile?.avatar} name={profile?.name} size={80} />
+                        {avatarBusy && <span className="absolute inset-0 grid place-items-center rounded-full bg-black/40"><span className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" /></span>}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <Button onClick={() => fileRef.current?.click()} disabled={disabled || avatarBusy}>
+                            <Camera className="h-4 w-4" /> Upload photo
+                        </Button>
+                        {profile?.avatar && (
+                            <Button variant="ghost" onClick={() => chooseAvatar(null)} disabled={disabled || avatarBusy}>
+                                <Trash2 className="h-4 w-4" /> Remove
+                            </Button>
+                        )}
+                        <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && uploadAvatar(e.target.files[0])} />
+                    </div>
+                </div>
+                <p className="mt-4 text-sm text-zinc-500">Or pick one:</p>
+                <div className="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-label="Built-in avatars">
+                    {AVATAR_NAMES.map((n) => {
+                        const ref = `avatar:${n}`;
+                        const selected = profile?.avatar === ref;
                         return (
                             <button
-                                key={tab.id}
-                                onClick={() => setActiveTab(tab.id)}
-                                role="tab"
-                                aria-selected={active}
-                                className={cn(
-                                    "flex min-h-11 items-center justify-center sm:justify-start gap-2 px-3 sm:px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors shrink-0",
-                                    active
-                                        ? "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-700"
-                                        : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-                                )}
+                                key={n}
+                                type="button"
+                                role="radio"
+                                aria-checked={selected}
+                                aria-label={`Avatar ${n}`}
+                                disabled={disabled || avatarBusy}
+                                onClick={() => chooseAvatar(ref)}
+                                className={cn("rounded-full transition disabled:opacity-50", selected ? "ring-2 ring-zinc-900 ring-offset-2 dark:ring-white dark:ring-offset-zinc-900" : "hover:scale-105")}
                             >
-                                <Icon className={cn("w-4 h-4", active ? "text-zinc-900 dark:text-white" : "text-zinc-400")} />
-                                {tab.label}
+                                <Avatar value={ref} size={44} />
                             </button>
                         );
                     })}
                 </div>
+                {avatarStatus && <Notice tone={avatarStatus.tone} className="mt-3">{avatarStatus.text}</Notice>}
+            </div>
 
-                {/* Content Area */}
-                <div className="bg-white/50 dark:bg-zinc-900/30 border border-zinc-200 dark:border-zinc-800 rounded-2xl sm:rounded-3xl p-5 md:p-10 shadow-sm">
+            {/* Info */}
+            <form onSubmit={save} className="space-y-4 border-t border-zinc-100 pt-6 dark:border-zinc-800">
+                <h3 className="text-base font-semibold text-zinc-900 dark:text-white">Details</h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Name">{(id) => <Input id={id} value={form.name} onChange={set("name")} maxLength={60} autoComplete="name" disabled={disabled} required />}</Field>
+                    <Field label="Email" hint="Your sign-in email can't be changed here.">{(id) => <Input id={id} value={profile?.email || ""} disabled readOnly />}</Field>
+                    <Field label="Phone">{(id) => <Input id={id} value={form.phone} onChange={set("phone")} maxLength={30} inputMode="tel" autoComplete="tel" disabled={disabled} placeholder="+94 77 123 4567" />}</Field>
+                    <Field label="Organisation">{(id) => <Input id={id} value={form.organization} onChange={set("organization")} maxLength={100} autoComplete="organization" disabled={disabled} />}</Field>
+                    <Field label="Country">{(id) => <Input id={id} value={form.country} onChange={set("country")} maxLength={60} autoComplete="country-name" disabled={disabled} />}</Field>
+                    <Field label="User ID" hint="Used when setting up a new device.">{(id) => <Input id={id} value={profile?.userId8 || profile?.id || ""} disabled readOnly className="font-mono" />}</Field>
+                </div>
+                <Field label="About" hint={`${form.bio.length}/300`}>{(id) => <Textarea id={id} value={form.bio} onChange={set("bio")} maxLength={300} disabled={disabled} placeholder="What do you use ThingsString for?" />}</Field>
+                {status && <Notice tone={status.tone}>{status.text}</Notice>}
+                <div className="flex justify-end">
+                    <Button type="submit" variant="primary" loading={saving} disabled={disabled || !dirty}>Save profile</Button>
+                </div>
+            </form>
+        </div>
+    );
+}
 
-                    {/* Profile Tab */}
-                    {activeTab === "profile" && (
-                        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            <div>
-                                <h2 className="text-2xl font-bold mb-1">Public Profile</h2>
-                                <p className="text-sm text-zinc-500">How you appear to other members of your organization.</p>
-                            </div>
+/* ---------------- Password ---------------- */
+function PasswordTab({ profile, disabled }: { profile: Profile | null; disabled: boolean }) {
+    const hasPassword = profile?.hasPassword !== false;
+    const [current, setCurrent] = useState("");
+    const [next, setNext] = useState("");
+    const [confirm, setConfirm] = useState("");
+    const [saving, setSaving] = useState(false);
+    const [status, setStatus] = useState<Status>(null);
 
-                            <div className="flex flex-col sm:flex-row items-center gap-8 pb-8 border-b border-zinc-100 dark:border-zinc-800">
-                                <div className="relative group">
-                                    <div className="h-28 w-28 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center border-4 border-white dark:border-zinc-900 shadow-2xl overflow-hidden">
-                                        <User className="w-12 h-12 text-zinc-300" />
-                                    </div>
-                                    <button className="absolute inset-0 bg-black/40 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-full transition duration-300 backdrop-blur-[2px]">
-                                        <span className="text-xs font-bold">Change</span>
-                                    </button>
-                                </div>
-                                <div className="space-y-3 text-center sm:text-left">
-                                    <div className="space-y-1">
-                                        <h3 className="font-bold text-zinc-900 dark:text-zinc-100">Profile Picture</h3>
-                                        <p className="text-xs text-zinc-500 max-w-[200px]">We recommend an image of at least 400x400. Gifs work too!</p>
-                                    </div>
-                                    <div className="flex gap-2 justify-center sm:justify-start">
-                                        <button className="px-4 py-2 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
-                                            Upload New
-                                        </button>
-                                        <button className="px-4 py-2 text-red-500 text-xs font-bold hover:bg-red-50 dark:hover:bg-red-950/20 rounded-xl transition">
-                                            Remove
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
+    const mismatch = confirm.length > 0 && confirm !== next;
+    const tooShort = next.length > 0 && next.length < 8;
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                <div className="space-y-2">
-                                    <label className="text-sm font-bold text-zinc-700 dark:text-zinc-300 ml-1">Full Name</label>
-                                    <input
-                                        type="text"
-                                        defaultValue={user?.name || ""}
-                                        className="w-full px-5 py-3.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white outline-none transition"
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-sm font-bold text-zinc-700 dark:text-zinc-300 ml-1">Email Address</label>
-                                    <input
-                                        type="email"
-                                        defaultValue={user?.email || ""}
-                                        className="w-full px-5 py-3.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white outline-none transition"
-                                    />
-                                </div>
-                                <div className="md:col-span-2 space-y-2">
-                                    <label className="text-sm font-bold text-zinc-700 dark:text-zinc-300 ml-1">Bio / Organization Notes</label>
-                                    <textarea
-                                        rows={4}
-                                        placeholder="Tell us about yourself or your IoT projects..."
-                                        className="w-full px-5 py-3.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white outline-none transition resize-none"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    )}
+    async function submit(e: React.FormEvent) {
+        e.preventDefault();
+        if (next.length < 8 || next.length > 128) return setStatus({ tone: "error", text: "The new password must be 8 to 128 characters." });
+        if (next !== confirm) return setStatus({ tone: "error", text: "The new passwords don't match." });
+        setSaving(true);
+        setStatus(null);
+        try {
+            const r: any = await apiRequest("/api/me/password", { method: "PUT", body: { ...(hasPassword ? { currentPassword: current } : {}), newPassword: next } });
+            // Every other session is logged out; this one continues with the new token.
+            if (r?.token) setAuth({ token: r.token, userId: undefined, userId8: undefined });
+            setCurrent("");
+            setNext("");
+            setConfirm("");
+            setStatus({ tone: "success", text: "Password changed. You've been signed out on your other devices." });
+        } catch (err: any) {
+            setStatus({ tone: "error", text: err.message || "Couldn't change your password." });
+        } finally {
+            setSaving(false);
+        }
+    }
 
-                    {/* Security Tab */}
-                    {activeTab === "security" && (
-                        <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            <div>
-                                <h2 className="text-2xl font-bold mb-1">Security</h2>
-                                <p className="text-sm text-zinc-500">Protect your account and IoT data integrity.</p>
-                            </div>
+    return (
+        <form onSubmit={submit} className="max-w-md space-y-4">
+            <div>
+                <h3 className="text-base font-semibold text-zinc-900 dark:text-white">{hasPassword ? "Change password" : "Set a password"}</h3>
+                <p className="mt-1 text-sm text-zinc-500">
+                    {hasPassword
+                        ? "Changing your password signs you out everywhere else."
+                        : "You sign in with Google. Set a password to also sign in with your email."}
+                </p>
+            </div>
+            {hasPassword && (
+                <Field label="Current password">{(id) => <Input id={id} type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" disabled={disabled} required />}</Field>
+            )}
+            <Field label="New password" error={tooShort ? "At least 8 characters." : undefined}>
+                {(id) => <Input id={id} type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" minLength={8} maxLength={128} disabled={disabled} required />}
+            </Field>
+            <Field label="Confirm new password" error={mismatch ? "Doesn't match." : undefined}>
+                {(id) => <Input id={id} type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" disabled={disabled} required />}
+            </Field>
+            {status && <Notice tone={status.tone}>{status.text}</Notice>}
+            <Button type="submit" variant="primary" loading={saving} disabled={disabled || !next || mismatch || tooShort || (hasPassword && !current)}>
+                {hasPassword ? "Change password" : "Set password"}
+            </Button>
+        </form>
+    );
+}
 
-                            <div className="space-y-6">
-                                <div className="flex items-center gap-3">
-                                    <Shield className="w-5 h-5 text-zinc-400" />
-                                    <h3 className="text-sm font-black uppercase tracking-[0.2em] text-zinc-400">Password</h3>
-                                </div>
-                                <div className="grid gap-6">
-                                    <div className="space-y-2">
-                                        <label className="text-sm font-bold text-zinc-700 dark:text-zinc-300 ml-1">Current Password</label>
-                                        <input type="password" placeholder="••••••••" className="w-full px-5 py-3.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white outline-none transition" />
-                                    </div>
-                                    <div className="grid md:grid-cols-2 gap-6">
-                                        <div className="space-y-2">
-                                            <label className="text-sm font-bold text-zinc-700 dark:text-zinc-300 ml-1">New Password</label>
-                                            <input type="password" placeholder="New password" className="w-full px-5 py-3.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white outline-none transition" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <label className="text-sm font-bold text-zinc-700 dark:text-zinc-300 ml-1">Confirm New Password</label>
-                                            <input type="password" placeholder="Confirm new password" className="w-full px-5 py-3.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white outline-none transition" />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+/* ---------------- Preferences ---------------- */
+function PreferencesTab({ preferences, supported }: { preferences: Preferences; supported: boolean }) {
+    const [status, setStatus] = useState<Status>(null);
+    const [savingKey, setSavingKey] = useState<string | null>(null);
+    const timezones = useMemo(() => {
+        try {
+            return (Intl as any).supportedValuesOf("timeZone") as string[];
+        } catch {
+            return ["UTC", "Asia/Colombo"];
+        }
+    }, []);
+    const browserTz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
 
-                            <div className="pt-10 border-t border-zinc-100 dark:border-zinc-800 space-y-6">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <Key className="w-5 h-5 text-zinc-400" />
-                                        <h3 className="text-sm font-black uppercase tracking-[0.2em] text-zinc-400">Developer API Keys</h3>
-                                    </div>
-                                    <button className="text-xs font-bold text-zinc-900 dark:text-zinc-100 hover:underline">
-                                        Rotate Key
-                                    </button>
-                                </div>
+    // Keep the applied theme in sync if the preference changes elsewhere
+    useEffect(() => {
+        applyTheme(preferences.theme);
+    }, [preferences.theme]);
 
-                                <div className="relative group">
-                                    <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
-                                        <Cpu className="w-4 h-4 text-zinc-400" />
-                                    </div>
-                                    <input
-                                        type={showApiKey ? "text" : "password"}
-                                        readOnly
-                                        value="ts_live_51P2u8Rj9v0x2yVw3x7z8a9b0c1d2e3f4g"
-                                        className="w-full pl-12 pr-12 py-4 bg-zinc-950 border border-white/10 rounded-2xl text-sm font-mono text-zinc-300 outline-none"
-                                    />
-                                    <button
-                                        onClick={() => setShowApiKey(!showApiKey)}
-                                        className="absolute inset-y-0 right-4 flex items-center p-2 hover:text-white text-zinc-500 transition"
-                                    >
-                                        {showApiKey ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
+    async function save(patch: Partial<Preferences>) {
+        const key = Object.keys(patch)[0];
+        setStatus(null);
+        setPreferences(patch); // optimistic
+        if (patch.theme) applyTheme(patch.theme);
+        if (!supported) return;
+        setSavingKey(key);
+        try {
+            const r: any = await apiRequest("/api/me/preferences", { method: "PATCH", body: patch });
+            if (r?.preferences) setPreferences(r.preferences);
+        } catch (err: any) {
+            setStatus({ tone: "error", text: err.message || "Couldn't save that setting." });
+        } finally {
+            setSavingKey(null);
+        }
+    }
 
-                    {/* Notifications Tab */}
-                    {activeTab === "notifications" && (
-                        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            <div>
-                                <h2 className="text-2xl font-bold mb-1">Notifications</h2>
-                                <p className="text-sm text-zinc-500">Configure how and when you receive alerts.</p>
-                            </div>
+    const themes: { id: ThemePref; label: string; icon: any }[] = [
+        { id: "light", label: "Light", icon: Sun },
+        { id: "dark", label: "Dark", icon: Moon },
+        { id: "system", label: "Auto", icon: Monitor },
+    ];
 
-                            <div className="space-y-4">
-                                {[
-                                    { id: "notify_offline", title: "Device Connectivity", desc: "Alerts when devices go offline for more than 5 minutes." },
-                                    { id: "notify_alert", title: "Critical Thresholds", desc: "Push notifications for sensor value anomalies." },
-                                    { id: "notify_updates", title: "Platform Updates", desc: "Announcements about new features and scheduled maintenance." },
-                                    { id: "notify_reports", title: "Weekly Insights", desc: "Summaries of your device performance and energy consumption." }
-                                ].map((item) => (
-                                    <div key={item.id} className="flex items-start justify-between p-6 rounded-3xl border border-zinc-100 dark:border-zinc-800/50 hover:bg-zinc-50/50 dark:hover:bg-zinc-900/30 transition duration-300">
-                                        <div className="space-y-1">
-                                            <div className="text-base font-bold text-zinc-900 dark:text-zinc-100">{item.title}</div>
-                                            <div className="text-sm text-zinc-500 font-medium">{item.desc}</div>
-                                        </div>
-                                        <label className="relative inline-flex items-center cursor-pointer mt-1">
-                                            <input type="checkbox" className="sr-only peer" defaultChecked={item.id !== "notify_updates"} />
-                                            <div className="w-12 h-6.5 bg-zinc-200 peer-focus:outline-none rounded-full peer dark:bg-zinc-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[3px] after:left-[3px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-black dark:peer-checked:bg-white"></div>
-                                        </label>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Preferences Tab */}
-                    {activeTab === "preferences" && (
-                        <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            <div>
-                                <h2 className="text-2xl font-bold mb-1">Preferences</h2>
-                                <p className="text-sm text-zinc-500">Personalize your ThingsString experience.</p>
-                            </div>
-
-                            <div className="space-y-8">
-                                <div className="space-y-4">
-                                    <div className="flex items-center gap-2 mb-4">
-                                        <Palette className="w-5 h-5 text-zinc-400" />
-                                        <h3 className="text-sm font-black uppercase tracking-[0.2em] text-zinc-400">Theme Appearance</h3>
-                                    </div>
-                                    <div className="grid grid-cols-3 gap-4">
-                                        {[
-                                            { id: "light", label: "Light", icon: Sun },
-                                            { id: "dark", label: "Dark", icon: Moon },
-                                            { id: "system", label: "System", icon: Monitor },
-                                        ].map((item) => (
-                                            <button
-                                                key={item.id}
-                                                onClick={() => handleThemeChange(item.id as any)}
-                                                className={cn(
-                                                    "flex flex-col items-center justify-center gap-3 p-5 rounded-3xl border-2 transition-all duration-300",
-                                                    theme === item.id
-                                                        ? "bg-white dark:bg-zinc-900 border-zinc-900 dark:border-white shadow-xl scale-[1.02]"
-                                                        : "bg-zinc-50/50 dark:bg-zinc-950/50 border-zinc-100 dark:border-zinc-800 text-zinc-500 hover:border-zinc-300 dark:hover:border-zinc-700"
-                                                )}
-                                            >
-                                                <item.icon className={cn("w-6 h-6", theme === item.id ? "text-zinc-900 dark:text-white" : "text-zinc-400")} />
-                                                <span className={cn("text-sm font-bold", theme === item.id ? "text-zinc-900 dark:text-white" : "")}>{item.label}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div className="grid md:grid-cols-2 gap-8">
-                                    <div className="space-y-4">
-                                        <div className="flex items-center gap-2">
-                                            <Languages className="w-4 h-4 text-zinc-400" />
-                                            <label className="text-sm font-bold text-zinc-700 dark:text-zinc-300">Language</label>
-                                        </div>
-                                        <select className="w-full px-5 py-3.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white outline-none transition appearance-none">
-                                            <option>English (US)</option>
-                                            <option>Spanish</option>
-                                            <option>German</option>
-                                            <option>Chinese</option>
-                                        </select>
-                                    </div>
-
-                                    <div className="space-y-4">
-                                        <div className="flex items-center gap-2">
-                                            <Clock className="w-4 h-4 text-zinc-400" />
-                                            <label className="text-sm font-bold text-zinc-700 dark:text-zinc-300">Timezone</label>
-                                        </div>
-                                        <select className="w-full px-5 py-3.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white outline-none transition appearance-none">
-                                            <option>(GMT+05:30) Colombo, Sri Lanka</option>
-                                            <option>(GMT+00:00) London, United Kingdom</option>
-                                            <option>(GMT-08:00) Pacific Time (US & Canada)</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="mt-16 pt-8 border-t border-zinc-100 dark:border-zinc-800 flex flex-col sm:flex-row items-center justify-between gap-4">
-                        <div className="text-center sm:text-left">
-                            <h4 className="text-sm font-bold text-red-500 mb-1">Danger Zone</h4>
-                            <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Actions here are irreversible</p>
-                        </div>
-                        <button className="flex items-center gap-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 px-6 py-3 rounded-2xl text-sm font-bold transition-all border border-red-100 dark:border-red-900/30">
-                            <Trash2 className="w-4 h-4" /> Delete Account
+    return (
+        <div className="space-y-8">
+            <div>
+                <h3 className="text-base font-semibold text-zinc-900 dark:text-white">Theme</h3>
+                <p className="mt-1 text-sm text-zinc-500">Auto follows your phone or computer setting.</p>
+                <div role="radiogroup" aria-label="Theme" className="mt-3 grid grid-cols-3 gap-2 sm:max-w-md">
+                    {themes.map((t) => (
+                        <button
+                            key={t.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={preferences.theme === t.id}
+                            onClick={() => save({ theme: t.id })}
+                            className={cn(
+                                "flex flex-col items-center gap-1.5 rounded-xl border px-3 py-3 text-sm font-semibold transition",
+                                preferences.theme === t.id
+                                    ? "border-zinc-900 bg-zinc-900 text-white dark:border-white dark:bg-white dark:text-zinc-900"
+                                    : "border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                            )}
+                        >
+                            <t.icon className="h-5 w-5" />
+                            {t.label}
                         </button>
-                    </div>
+                    ))}
                 </div>
             </div>
+
+            <div className="grid gap-4 border-t border-zinc-100 pt-6 sm:grid-cols-2 dark:border-zinc-800">
+                <Field label="Units" hint="Temperatures show in °C or °F.">
+                    {(id) => (
+                        <Select id={id} value={preferences.units} disabled={!supported || savingKey === "units"} onChange={(e) => save({ units: e.target.value as Preferences["units"] })}>
+                            <option value="metric">Metric (°C)</option>
+                            <option value="imperial">Imperial (°F)</option>
+                        </Select>
+                    )}
+                </Field>
+                <Field label="Time zone" hint="Default for new schedules.">
+                    {(id) => (
+                        <Select id={id} value={preferences.timezone || ""} disabled={!supported || savingKey === "timezone"} onChange={(e) => save({ timezone: e.target.value || null })}>
+                            <option value="">Use this device&apos;s ({browserTz})</option>
+                            {timezones.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+                        </Select>
+                    )}
+                </Field>
+            </div>
+            {status && <Notice tone={status.tone}>{status.text}</Notice>}
         </div>
     );
 }

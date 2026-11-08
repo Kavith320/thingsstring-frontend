@@ -19,15 +19,35 @@ import {
     Radio,
     Power,
     ChevronRight,
+    ChevronDown,
     WifiOff,
+    FolderKanban,
+    LayoutGrid,
+    GripVertical,
+    ChevronLeft,
+    Eye,
+    EyeOff,
+    RotateCcw,
 } from "lucide-react";
+import {
+    useDashboardLayout,
+    orderIds,
+    cardSpan,
+    GRID_COLS,
+    DEFAULT_LAYOUT,
+    type CardSize,
+    type DashboardLayout,
+} from "@/lib/dashboardLayout";
+import { Button, IconBadge } from "@/components/common/ui";
+import GroupsModal, { type DeviceGroup } from "@/components/dashboard/GroupsModal";
+import { IconRef } from "@/lib/icons";
+import { convertReading, useUnits } from "@/lib/profile";
+import { arrangeEntries, deviceDisplayName, deviceId, deviceOnline, deviceUi, getPath, sensorKeys } from "@/lib/deviceUi";
 import {
     cn,
     formatLastSeen,
     getLastTelemetryMs,
-    humanizeKey,
     isActuatorAuto,
-    isOnlineFromLastTelemetry,
     toOnOff,
 } from "@/lib/utils";
 
@@ -42,18 +62,29 @@ interface Device {
         actuators?: Record<string, any>;
     };
     control?: { actuators?: Record<string, any> } | null;
+    ui?: any;
+    status?: { online?: boolean; lastSeen?: string | null };
 }
 
-interface Sensor { key: string; label: string; value: number; unit: string; icon: any }
+/** `icon` is a default icon component; `iconRef` a user-chosen icon reference */
+interface Sensor { key: string; label: string; value: number; unit: string; icon: any; iconRef: string | null; color: string | null }
 interface Actuator { key: string; label: string; state: "ON" | "OFF"; auto: boolean }
 interface DeviceRow {
     id: string;
     name: string;
     model: string;
+    icon: string | null;
+    color: string | null;
     online: boolean;
     lastSeenMs: number | null;
+    /** readings for the card: pinned ones if any are pinned, otherwise all visible */
     sensors: Sensor[];
+    /** every visible reading, pinned first (large cards show more) */
+    allSensors: Sensor[];
+    /** controls for the card: pinned ones if any are pinned, otherwise all visible */
     actuators: Actuator[];
+    /** every actuator, for the summary counts */
+    allActuators: Actuator[];
 }
 
 /* -------- Sensor helpers -------- */
@@ -94,34 +125,53 @@ function formatValue(v: number) {
     return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
 
-function toRow(d: Device): DeviceRow {
-    const id = d?.deviceId || d?.config?.device?.device_id || d?._id || "-";
-    const last = d?.last_telemetry || {};
+function toRow(d: Device, units: "metric" | "imperial"): DeviceRow {
+    const id = deviceId(d) || "-";
+    const last: any = d?.last_telemetry || {};
+    const ui = deviceUi(d);
 
-    const sensors: Sensor[] = Object.entries(last)
-        .filter(([k, v]) => !NON_SENSOR_KEYS.has(k) && typeof v === "number" && Number.isFinite(v))
-        .map(([k, v]) => ({ key: k, label: humanizeKey(k), value: v as number, unit: getUnitForKey(k), icon: getIconForKey(k) }));
+    // Readings: numeric fields, in the user's saved order, hidden ones left out
+    const numericKeys = sensorKeys(last).filter((k) => {
+        const v = getPath(last, k);
+        return !NON_SENSOR_KEYS.has(k) && typeof v === "number" && Number.isFinite(v);
+    });
+    const visibleSensors = arrangeEntries(numericKeys, ui.sensors).filter((e) => e.visible);
+    const pinnedSensors = visibleSensors.filter((e) => e.pinned);
+    const toSensor = (e: (typeof visibleSensors)[number]): Sensor => {
+        const leaf = e.key.split(".").pop() || e.key;
+        const conv = convertReading(getPath(last, e.key), e.unit || getUnitForKey(leaf), units);
+        return { key: e.key, label: e.title, value: conv.value, unit: conv.unit, icon: getIconForKey(leaf), iconRef: e.icon, color: e.color };
+    };
+    const sensors = (pinnedSensors.length ? pinnedSensors : visibleSensors).map(toSensor);
+    const allSensors = [...pinnedSensors, ...visibleSensors.filter((e) => !e.pinned)].map(toSensor);
 
     // Desired state + mode come from device_control (what the backend acts on); the
     // device's own report in telemetry wins for the live ON/OFF when present.
     const control = d?.control?.actuators || {};
     const config = d?.config?.actuators || {};
-    const reported = (last as any).actuators || {};
-    const keys = new Set([...Object.keys(control), ...Object.keys(config), ...Object.keys(reported)]);
-    const actuators: Actuator[] = [...keys].map((key) => {
+    const reported = last.actuators || {};
+    const keys = [...new Set([...Object.keys(control), ...Object.keys(config), ...Object.keys(reported)])];
+    const toActuator = (key: string, label: string): Actuator => {
         const ctl = control[key] ?? config[key];
         const live = reported[key] ?? ctl?.state ?? ctl?.status ?? ctl?.value ?? ctl?.default?.state;
-        return { key, label: humanizeKey(key), state: toOnOff(live), auto: isActuatorAuto(ctl) };
-    });
+        return { key, label, state: toOnOff(live), auto: isActuatorAuto(ctl) };
+    };
+    const arranged = arrangeEntries(keys, ui.actuators);
+    const visibleActs = arranged.filter((e) => e.visible);
+    const pinnedActs = visibleActs.filter((e) => e.pinned);
 
     return {
         id,
-        name: d?.config?.device?.name || d?.name || id,
+        name: deviceDisplayName(d),
         model: d?.config?.device?.model || "Device",
-        online: isOnlineFromLastTelemetry(last),
+        icon: ui.icon,
+        color: ui.color,
+        online: deviceOnline(d),
         lastSeenMs: getLastTelemetryMs(last),
         sensors,
-        actuators,
+        allSensors,
+        actuators: (pinnedActs.length ? pinnedActs : visibleActs).map((e) => toActuator(e.key, e.title)),
+        allActuators: arranged.map((e) => toActuator(e.key, e.title)),
     };
 }
 
@@ -159,7 +209,66 @@ export default function DashboardPage() {
         return () => clearInterval(id);
     }, []);
 
-    const allRows = useMemo(() => devices.map(toRow), [devices]);
+    const units = useUnits();
+    const allRows = useMemo(() => devices.map((d) => toRow(d, units)), [devices, units]);
+    const rowById = useMemo(() => new Map(allRows.map((r) => [r.id, r])), [allRows]);
+
+    // Device groups (sections). Loaded once; the list is edited in the groups dialog.
+    const [groups, setGroups] = useState<DeviceGroup[]>([]);
+    const [groupsSupported, setGroupsSupported] = useState(true);
+    const [managingGroups, setManagingGroups] = useState(false);
+    useEffect(() => {
+        apiRequest("/api/groups", { quiet: true })
+            .then((r: any) => setGroups(Array.isArray(r?.groups) ? r.groups : []))
+            .catch((e) => {
+                if (/not found/i.test(e?.message || "")) setGroupsSupported(false);
+            });
+    }, []);
+
+    // Grid layout (order, sizes, hidden cards, columns) and its edit mode
+    const { layout, save: saveLayout, serverSupported: layoutOnServer } = useDashboardLayout();
+    const [draft, setDraft] = useState<DashboardLayout | null>(null);
+    const [dragId, setDragId] = useState<string | null>(null);
+    const [savingLayout, setSavingLayout] = useState(false);
+    const [layoutError, setLayoutError] = useState("");
+    const editing = draft !== null;
+    const active = draft || layout;
+
+    function startEditing() {
+        setLayoutError("");
+        setDraft(structuredClone(layout));
+    }
+    async function finishEditing() {
+        if (!draft) return;
+        setSavingLayout(true);
+        setLayoutError("");
+        try {
+            await saveLayout(draft);
+            setDraft(null);
+        } catch (e: any) {
+            setLayoutError(e?.message || "Couldn't save the layout.");
+        } finally {
+            setSavingLayout(false);
+        }
+    }
+    const setCard = (id: string, patch: { size?: CardSize; hidden?: boolean }) =>
+        setDraft((d) => d && { ...d, cards: { ...d.cards, [id]: { ...d.cards[id], ...patch } } });
+    function moveCard(sectionKey: string, ids: string[], id: string, toIndex: number) {
+        const from = ids.indexOf(id);
+        if (from < 0 || toIndex < 0 || toIndex >= ids.length || from === toIndex) return;
+        const next = [...ids];
+        next.splice(from, 1);
+        next.splice(toIndex, 0, id);
+        setDraft((d) => d && { ...d, order: { ...d.order, [sectionKey]: next } });
+    }
+
+    function toggleCollapsed(g: DeviceGroup) {
+        const collapsed = !g.collapsed;
+        setGroups((gs) => gs.map((x) => (x.id === g.id ? { ...x, collapsed } : x)));
+        apiRequest(`/api/groups/${g.id}`, { method: "PATCH", body: { collapsed }, quiet: true }).catch(() => {
+            // Only a remembered fold; keep the local state even if saving fails
+        });
+    }
 
     const rows = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -167,9 +276,31 @@ export default function DashboardPage() {
         return allRows.filter((r) => r.name.toLowerCase().includes(q) || String(r.id).toLowerCase().includes(q));
     }, [allRows, query]);
 
+    const { sections, hiddenCount } = useMemo(() => {
+        const matching = new Set(rows.map((r) => r.id));
+        const isHidden = (id: string) => !!active.cards[id]?.hidden;
+        let hiddenCount = 0;
+        const grouped = new Set<string>();
+        const out: { key: string; group: DeviceGroup | null; ids: string[]; rows: DeviceRow[] }[] = [];
+        const build = (key: string, group: DeviceGroup | null, ids: string[]) => {
+            const ordered = orderIds(ids, active.order[key]);
+            const shown = ordered.filter((id) => matching.has(id) && (editing || !isHidden(id)));
+            hiddenCount += ordered.filter((id) => matching.has(id) && isHidden(id)).length;
+            return { key, group, ids: ordered, rows: shown.map((id) => rowById.get(id)!).filter(Boolean) };
+        };
+        for (const g of groups) {
+            g.deviceIds.forEach((id) => grouped.add(id));
+            const sec = build(g.id, g, g.deviceIds.filter((id) => rowById.has(id)));
+            if (sec.rows.length || (!query && !editing)) out.push(sec);
+        }
+        const rest = build("ungrouped", null, allRows.map((r) => r.id).filter((id) => !grouped.has(id)));
+        if (rest.rows.length) out.push(rest);
+        return { sections: out, hiddenCount: editing ? 0 : hiddenCount };
+    }, [rows, allRows, groups, rowById, query, active, editing]);
+
     const stats = useMemo(() => {
         const online = allRows.filter((r) => r.online).length;
-        const acts = allRows.flatMap((r) => r.actuators);
+        const acts = allRows.flatMap((r) => r.allActuators);
         return {
             total: allRows.length,
             online,
@@ -189,7 +320,8 @@ export default function DashboardPage() {
                     <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-white">Overview</h2>
                     <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Live status of your devices, refreshed every 5 seconds</p>
                 </div>
-                <label className="relative w-full sm:w-72">
+                <div className="flex w-full gap-2 sm:w-auto">
+                <label className="relative min-w-0 flex-1 sm:w-72 sm:flex-none">
                     <span className="sr-only">Search devices</span>
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                     <input
@@ -199,6 +331,17 @@ export default function DashboardPage() {
                         className="h-11 w-full rounded-xl border border-zinc-200 bg-white pl-9 pr-3 text-sm outline-none transition focus:border-zinc-400 focus:ring-2 focus:ring-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-900 dark:focus:border-zinc-600"
                     />
                 </label>
+                {groupsSupported && (
+                    <Button onClick={() => setManagingGroups(true)} aria-label="Manage groups" title="Group devices into sections" disabled={editing}>
+                        <FolderKanban className="h-4 w-4" />
+                        <span className="hidden sm:inline">Groups</span>
+                    </Button>
+                )}
+                <Button onClick={startEditing} aria-label="Edit layout" title="Reorder, resize and hide cards" disabled={editing || devices.length === 0}>
+                    <LayoutGrid className="h-4 w-4" />
+                    <span className="hidden sm:inline">Layout</span>
+                </Button>
+                </div>
             </div>
 
             {/* Summary */}
@@ -250,12 +393,124 @@ export default function DashboardPage() {
                 </div>
             )}
 
-            {/* Device grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
-                {rows.map((dev) => (
-                    <DeviceCard key={dev.id} dev={dev} />
-                ))}
-            </div>
+            {editing && draft && (
+                <div className="sticky top-16 sm:top-20 z-20 rounded-2xl border border-indigo-500/30 bg-white/95 p-3 shadow-lg backdrop-blur dark:bg-zinc-900/95">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+                        <div className="min-w-0 flex-1 basis-full sm:basis-auto">
+                            <div className="text-sm font-semibold text-zinc-900 dark:text-white">Editing layout</div>
+                            <div className="text-xs text-zinc-500">
+                                <span className="hidden md:inline">Drag cards to reorder, or use ◀ ▶.</span>
+                                <span className="md:hidden">Use ◀ ▶ to reorder.</span> Pick S / M / L for size.
+                            </div>
+                        </div>
+                        <div className="hidden lg:flex items-center gap-2">
+                            <span className="text-sm text-zinc-500">Columns</span>
+                            <div role="radiogroup" aria-label="Columns" className="inline-flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+                                {([1, 2, 3, 4] as const).map((c) => (
+                                    <button
+                                        key={c}
+                                        type="button"
+                                        role="radio"
+                                        aria-checked={draft.columns === c}
+                                        onClick={() => setDraft({ ...draft, columns: c })}
+                                        className={cn("h-8 w-9 rounded-md text-sm font-semibold", draft.columns === c ? "bg-white shadow-sm dark:bg-zinc-950" : "text-zinc-500")}
+                                    >
+                                        {c}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="flex w-full gap-2 sm:w-auto">
+                            <Button variant="ghost" onClick={() => setDraft(structuredClone(DEFAULT_LAYOUT))} title="Back to the default layout">
+                                <RotateCcw className="h-4 w-4" /> <span className="hidden sm:inline">Reset</span>
+                            </Button>
+                            <Button className="flex-1 sm:flex-none" onClick={() => { setDraft(null); setLayoutError(""); }}>Cancel</Button>
+                            <Button className="flex-1 sm:flex-none" variant="primary" onClick={finishEditing} loading={savingLayout}>Done</Button>
+                        </div>
+                    </div>
+                    {layoutError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{layoutError}</p>}
+                    {!layoutOnServer && <p className="mt-2 text-xs text-zinc-500">Saved in this browser only until your server supports dashboard layouts.</p>}
+                </div>
+            )}
+
+            {/* Device sections: one per group, then everything not in a group */}
+            {sections.map((sec) => (
+                <section key={sec.key} aria-labelledby={`sec-${sec.key}`}>
+                    {sec.group ? (
+                        <button
+                            type="button"
+                            onClick={() => toggleCollapsed(sec.group!)}
+                            aria-expanded={!sec.group.collapsed}
+                            className="mb-3 flex w-full items-center gap-3 rounded-xl py-1 text-left"
+                        >
+                            <IconBadge icon={sec.group.icon} color={sec.group.color} fallback={FolderKanban} size="sm" />
+                            <h3 id={`sec-${sec.key}`} className="min-w-0 truncate text-base font-semibold text-zinc-900 dark:text-white">{sec.group.name}</h3>
+                            <span className="text-sm text-zinc-500">{sec.rows.length}</span>
+                            <span className="ml-auto h-px flex-1 bg-zinc-200 dark:bg-zinc-800" aria-hidden />
+                            <ChevronDown className={cn("h-4 w-4 shrink-0 text-zinc-400 transition-transform", sec.group.collapsed && "-rotate-90")} />
+                        </button>
+                    ) : groups.length > 0 ? (
+                        <h3 id={`sec-${sec.key}`} className="mb-3 text-base font-semibold text-zinc-900 dark:text-white">Other devices <span className="font-normal text-zinc-500">{sec.rows.length}</span></h3>
+                    ) : null}
+                    {(!sec.group?.collapsed || editing) && (
+                        <div className={cn("grid grid-cols-2 md:grid-cols-2 gap-3 sm:gap-4 items-start", GRID_COLS[active.columns])}>
+                            {sec.rows.map((dev) => {
+                                const card = active.cards[dev.id] || {};
+                                const size: CardSize = card.size || "m";
+                                const visibleIds = sec.rows.map((r) => r.id);
+                                const index = visibleIds.indexOf(dev.id);
+                                return (
+                                    <div
+                                        key={dev.id}
+                                        className={cn(cardSpan(size, active.columns), "min-w-0", dragId === dev.id && "opacity-40")}
+                                        draggable={editing}
+                                        onDragStart={(e) => {
+                                            setDragId(dev.id);
+                                            e.dataTransfer.effectAllowed = "move";
+                                            e.dataTransfer.setData("text/plain", dev.id);
+                                        }}
+                                        onDragEnd={() => setDragId(null)}
+                                        onDragOver={(e) => {
+                                            if (editing && dragId && visibleIds.includes(dragId)) e.preventDefault();
+                                        }}
+                                        onDrop={(e) => {
+                                            e.preventDefault();
+                                            if (dragId && dragId !== dev.id) moveCard(sec.key, sec.ids, dragId, sec.ids.indexOf(dev.id));
+                                            setDragId(null);
+                                        }}
+                                    >
+                                        <DeviceCard
+                                            dev={dev}
+                                            size={size}
+                                            edit={
+                                                editing
+                                                    ? {
+                                                          hidden: !!card.hidden,
+                                                          canMoveBack: index > 0,
+                                                          canMoveForward: index < visibleIds.length - 1,
+                                                          onMove: (dir) => moveCard(sec.key, sec.ids, dev.id, sec.ids.indexOf(visibleIds[index + dir])),
+                                                          onSize: (sz) => setCard(dev.id, { size: sz }),
+                                                          onToggleHidden: () => setCard(dev.id, { hidden: !card.hidden }),
+                                                      }
+                                                    : undefined
+                                            }
+                                        />
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </section>
+            ))}
+
+            {hiddenCount > 0 && (
+                <p className="text-center text-sm text-zinc-500">
+                    {hiddenCount} hidden card{hiddenCount > 1 ? "s" : ""} ·{" "}
+                    <button type="button" onClick={startEditing} className="font-semibold text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300">Edit layout</button>
+                </p>
+            )}
+
+            <GroupsModal open={managingGroups} onClose={() => setManagingGroups(false)} groups={groups} devices={devices} onChange={setGroups} />
         </div>
     );
 }
@@ -280,50 +535,65 @@ function StatTile({ label, value, icon: Icon, tone = "neutral" }: { label: strin
     );
 }
 
-function DeviceCard({ dev }: { dev: DeviceRow }) {
-    const shown = dev.sensors.slice(0, MAX_SENSORS_ON_CARD);
-    const hidden = dev.sensors.length - shown.length;
+interface CardEdit {
+    hidden: boolean;
+    canMoveBack: boolean;
+    canMoveForward: boolean;
+    onMove: (dir: -1 | 1) => void;
+    onSize: (size: CardSize) => void;
+    onToggleHidden: () => void;
+}
 
-    return (
-        <Link
-            href={`/devices/${encodeURIComponent(dev.id)}`}
-            className="group flex flex-col rounded-2xl border border-zinc-200 bg-white p-4 sm:p-5 shadow-sm transition hover:border-zinc-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-zinc-800 dark:bg-zinc-900/40 dark:hover:border-zinc-700"
-        >
+const SENSORS_BY_SIZE: Record<CardSize, number> = { s: 2, m: MAX_SENSORS_ON_CARD, l: 8 };
+
+function DeviceCard({ dev, size = "m", edit }: { dev: DeviceRow; size?: CardSize; edit?: CardEdit }) {
+    const pool = size === "l" ? dev.allSensors : dev.sensors;
+    const shown = pool.slice(0, SENSORS_BY_SIZE[size]);
+    const more = pool.length - shown.length;
+    const small = size === "s";
+
+    const body = (
+        <>
             {/* Header */}
-            <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <h3 className="truncate text-base font-semibold text-zinc-900 dark:text-white" title={dev.name}>{dev.name}</h3>
-                    <p className="mt-0.5 truncate font-mono text-xs text-zinc-500 dark:text-zinc-400">{dev.model} · {dev.id}</p>
+            <div className="flex items-start justify-between gap-2 sm:gap-3">
+                <IconBadge icon={dev.icon} color={dev.color} fallback={Radio} size={small ? "sm" : "md"} />
+                <div className="min-w-0 flex-1">
+                    <h3 className={cn("truncate font-semibold text-zinc-900 dark:text-white", small ? "text-sm" : "text-base")} title={dev.name}>{dev.name}</h3>
+                    {small ? (
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-zinc-500">
+                            <span className={cn("h-1.5 w-1.5 rounded-full", dev.online ? "bg-emerald-500" : "bg-zinc-400")} />
+                            {dev.online ? "Online" : "Offline"}
+                        </p>
+                    ) : (
+                        <p className="mt-0.5 truncate font-mono text-xs text-zinc-500 dark:text-zinc-400">{dev.model} · {dev.id}</p>
+                    )}
                 </div>
-                <StatusPill online={dev.online} />
+                {!small && <StatusPill online={dev.online} />}
             </div>
 
             {/* Sensors */}
             {shown.length > 0 ? (
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                    {shown.map((s) => {
-                        const Icon = s.icon;
-                        return (
-                            <div key={s.key} className="flex min-w-0 items-center gap-2.5 rounded-xl bg-zinc-50 px-3 py-2.5 dark:bg-white/5">
-                                <Icon className="h-4 w-4 shrink-0 text-zinc-400" />
-                                <div className="min-w-0">
-                                    <div className="whitespace-nowrap text-sm font-semibold text-zinc-900 dark:text-white">
-                                        {formatValue(s.value)}
-                                        {s.unit && <span className="ml-0.5 text-xs font-normal text-zinc-500">{s.unit}</span>}
-                                    </div>
-                                    <div className="truncate text-xs text-zinc-500 dark:text-zinc-400" title={s.label}>{s.label}</div>
+                <div className={cn("mt-3 sm:mt-4 grid gap-2", small ? "grid-cols-1" : size === "l" ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-2")}>
+                    {shown.map((s) => (
+                        <div key={s.key} className={cn("flex min-w-0 items-center gap-2.5 rounded-xl bg-zinc-50 dark:bg-white/5", small ? "px-2.5 py-1.5" : "px-3 py-2.5")}>
+                            <IconRef value={s.iconRef} fallback={s.icon} className={cn("h-4 w-4 shrink-0 text-zinc-400", s.iconRef?.startsWith("emoji:") && "text-sm", s.iconRef?.startsWith("file:") && "rounded")} />
+                            <div className="min-w-0">
+                                <div className="whitespace-nowrap text-sm font-semibold text-zinc-900 dark:text-white">
+                                    {formatValue(s.value)}
+                                    {s.unit && <span className="ml-0.5 text-xs font-normal text-zinc-500">{s.unit}</span>}
                                 </div>
+                                <div className="truncate text-xs text-zinc-500 dark:text-zinc-400" title={s.label}>{s.label}</div>
                             </div>
-                        );
-                    })}
+                        </div>
+                    ))}
                 </div>
             ) : (
-                <p className="mt-4 rounded-xl bg-zinc-50 px-3 py-4 text-center text-sm text-zinc-500 dark:bg-white/5">No sensor readings yet</p>
+                <p className="mt-3 rounded-xl bg-zinc-50 px-3 py-3 text-center text-sm text-zinc-500 dark:bg-white/5">No readings yet</p>
             )}
-            {hidden > 0 && <p className="mt-2 text-xs text-zinc-500">+{hidden} more reading{hidden > 1 ? "s" : ""}</p>}
+            {more > 0 && !small && <p className="mt-2 text-xs text-zinc-500">+{more} more reading{more > 1 ? "s" : ""}</p>}
 
             {/* Actuators */}
-            {dev.actuators.length > 0 && (
+            {!small && dev.actuators.length > 0 && (
                 <div className="mt-4 flex flex-wrap gap-1.5">
                     {dev.actuators.map((a) => {
                         const on = a.state === "ON";
@@ -348,12 +618,84 @@ function DeviceCard({ dev }: { dev: DeviceRow }) {
             )}
 
             {/* Footer */}
-            <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-                <span>Last seen {formatLastSeen(dev.lastSeenMs)}</span>
-                <span className="inline-flex items-center gap-0.5 font-medium text-zinc-700 group-hover:text-zinc-900 dark:text-zinc-300 dark:group-hover:text-white">
-                    Open <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+            {!small && (
+                <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+                    <span>Last seen {formatLastSeen(dev.lastSeenMs)}</span>
+                    {!edit && (
+                        <span className="inline-flex items-center gap-0.5 font-medium text-zinc-700 group-hover:text-zinc-900 dark:text-zinc-300 dark:group-hover:text-white">
+                            Open <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                        </span>
+                    )}
+                </div>
+            )}
+        </>
+    );
+
+    const cardCls = cn(
+        "group flex flex-col rounded-2xl border bg-white shadow-sm dark:bg-zinc-900/40",
+        small ? "p-3" : "p-4 sm:p-5",
+        edit ? "border-dashed border-indigo-400/60 dark:border-indigo-500/40" : "border-zinc-200 transition hover:border-zinc-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-zinc-800 dark:hover:border-zinc-700",
+        edit?.hidden && "opacity-50"
+    );
+
+    if (!edit) {
+        return (
+            <Link href={`/devices/${encodeURIComponent(dev.id)}`} className={cardCls}>
+                {body}
+            </Link>
+        );
+    }
+
+    const sizes: { id: CardSize; label: string }[] = [
+        { id: "s", label: "S" },
+        { id: "m", label: "M" },
+        { id: "l", label: "L" },
+    ];
+    return (
+        <div className={cardCls}>
+            {/* Edit controls */}
+            <div className="-mx-1 -mt-1 mb-3 flex flex-wrap items-center gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800">
+                <span className="hidden md:grid h-8 w-6 cursor-grab place-items-center text-zinc-400 active:cursor-grabbing" title="Drag to move" aria-hidden>
+                    <GripVertical className="h-4 w-4" />
                 </span>
+                <EditBtn label={`Move ${dev.name} earlier`} onClick={() => edit.onMove(-1)} disabled={!edit.canMoveBack}><ChevronLeft className="h-4 w-4" /></EditBtn>
+                <EditBtn label={`Move ${dev.name} later`} onClick={() => edit.onMove(1)} disabled={!edit.canMoveForward}><ChevronRight className="h-4 w-4" /></EditBtn>
+                <div role="radiogroup" aria-label={`Size of ${dev.name}`} className="ml-auto inline-flex rounded-lg bg-white p-0.5 dark:bg-zinc-950">
+                    {sizes.map((sz) => (
+                        <button
+                            key={sz.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={size === sz.id}
+                            aria-label={{ s: "Small", m: "Medium", l: "Large" }[sz.id]}
+                            onClick={() => edit.onSize(sz.id)}
+                            className={cn("h-7 w-7 rounded-md text-xs font-bold", size === sz.id ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" : "text-zinc-500")}
+                        >
+                            {sz.label}
+                        </button>
+                    ))}
+                </div>
+                <EditBtn label={edit.hidden ? `Show ${dev.name}` : `Hide ${dev.name}`} onClick={edit.onToggleHidden} pressed={edit.hidden}>
+                    {edit.hidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </EditBtn>
             </div>
-        </Link>
+            {body}
+        </div>
+    );
+}
+
+function EditBtn({ label, onClick, disabled, pressed, children }: { label: string; onClick: () => void; disabled?: boolean; pressed?: boolean; children: React.ReactNode }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            disabled={disabled}
+            aria-label={label}
+            aria-pressed={pressed}
+            title={label}
+            className="grid h-8 w-8 place-items-center rounded-md text-zinc-600 hover:bg-white disabled:opacity-30 dark:text-zinc-300 dark:hover:bg-zinc-950"
+        >
+            {children}
+        </button>
     );
 }

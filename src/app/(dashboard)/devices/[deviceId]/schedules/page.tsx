@@ -13,6 +13,7 @@ import {
     type ScheduleType,
 } from "@/lib/schedule-utils";
 import { cn } from "@/lib/utils";
+import { useProfile } from "@/lib/profile";
 import Switch from "@/components/common/Switch";
 import { Calendar } from "lucide-react";
 
@@ -125,6 +126,7 @@ export default function DeviceSchedulesPage() {
     const deviceId = params?.deviceId as string;
 
     const [device, setDevice] = useState<Device | null>(null);
+    const profileTz = useProfile().profile?.preferences.timezone;
     const [schedules, setSchedules] = useState<Schedule[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
@@ -183,7 +185,10 @@ export default function DeviceSchedulesPage() {
     }, [device]);
 
     const timezoneDefault =
-        device?.config?.scheduler?.timezone || "Asia/Colombo";
+        device?.config?.scheduler?.timezone ||
+        profileTz ||
+        Intl.DateTimeFormat().resolvedOptions().timeZone ||
+        "Asia/Colombo";
 
     // -- Handlers --
 

@@ -8,6 +8,7 @@ const TITLES = [
   [/^\/devices\/[^/]+\/schedules/, "Schedules"],
   [/^\/devices\/[^/]+/, "Device"],
   [/^\/devices/, "Devices"],
+  [/^\/map/, "Map"],
   [/^\/automation/, "Automation"],
   [/^\/ai/, "ThingsString AI"],
   [/^\/settings/, "Settings"],

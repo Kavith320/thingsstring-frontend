@@ -1,4 +1,7 @@
 @import "tailwindcss";
+
+/* dark: utilities follow the .dark class on <html> (set from the user's theme preference) */
+@custom-variant dark (&:where(.dark, .dark *));
 @import "@xyflow/react/dist/style.css";
 
 html,

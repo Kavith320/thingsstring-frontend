@@ -126,3 +126,41 @@ export async function apiDownload(endpoint: string, filename: string): Promise<v
     // Revoking immediately can cancel the download in some browsers
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
+
+/** Public URL of an uploaded image (served without login at <backend>/files/<id>). */
+export function fileUrl(id: string): string {
+    return `${API_URL}/files/${encodeURIComponent(id)}`;
+}
+
+/**
+ * Send raw bytes (an image File/Blob) as the request body, as the backend's upload
+ * endpoints expect (not multipart). Returns the parsed JSON response.
+ */
+export async function apiUpload<T = any>(endpoint: string, blob: Blob, method: "PUT" | "POST" = "POST"): Promise<T> {
+    const token = getToken();
+    let res: Response;
+    try {
+        res = await fetch(`${API_URL}${endpoint}`, {
+            method,
+            headers: {
+                "Content-Type": blob.type || "application/octet-stream",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: blob,
+        });
+    } catch {
+        throw new NetworkError("Cannot reach the ThingsString server. Check your connection and try again.");
+    }
+    const text = await res.text();
+    let data: any = null;
+    try {
+        data = text ? JSON.parse(text) : null;
+    } catch {
+        data = null;
+    }
+    if (!res.ok) {
+        if (res.status === 413) throw new Error("That image is too large (max 2 MB).");
+        throw new Error(data?.error || data?.message || `Upload failed (${res.status})`);
+    }
+    return data as T;
+}

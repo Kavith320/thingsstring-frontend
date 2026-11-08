@@ -8,6 +8,7 @@ import { Mail, Lock, Eye, EyeOff, User } from "lucide-react";
 
 import { apiRequest } from "../../lib/api";
 import { setAuth } from "@/lib/auth/storage";
+import { applyTheme } from "@/lib/theme";
 import GoogleButton from "@/components/auth/GoogleButton";
 
 const SimpleDotsBackground = dynamic(() => import("@/components/common/SimpleDotsBackground"), {
@@ -71,6 +72,7 @@ export default function LoginClient() {
         userId: data.user?.id || data.user?._id,
         userId8: data.user?.userId8
       });
+      if (data.user?.preferences?.theme) applyTheme(data.user.preferences.theme);
       router.push(nextPath);
     } catch (err) {
       setError(err.message || (isRegister ? "Registration failed" : "Login failed"));

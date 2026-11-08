@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { apiRequest } from "@/lib/api";
 import { setAuth } from "@/lib/auth/storage";
+import { applyTheme } from "@/lib/theme";
 
 export default function GoogleButton({
   onError,
@@ -45,6 +46,7 @@ export default function GoogleButton({
                   userId: data.user?.id,
                   userId8: data.user?.userId8,
                 });
+                if (data.user?.preferences?.theme) applyTheme(data.user.preferences.theme);
 
                 window.location.href = onSuccessRedirect;
               } catch (e) {

@@ -8,17 +8,19 @@ import {
     Bot,
     Settings,
     LogOut,
-    User,
     Zap,
+    Map as MapIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getUser, logout } from "@/lib/auth";
-import { useEffect, useState } from "react";
+import { logout } from "@/lib/auth";
+import { useProfile } from "@/lib/profile";
+import { Avatar } from "@/lib/icons";
 import Logo from "@/components/common/Logo";
 
 const nav = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/devices", label: "Devices", icon: Radio },
+    { href: "/map", label: "Map", icon: MapIcon },
     { href: "/automation", label: "Automation", icon: Zap },
     { href: "/ai", label: "ThingsString AI", icon: Bot },
     { href: "/settings", label: "Settings", icon: Settings },
@@ -30,11 +32,7 @@ interface SidebarProps {
 
 export default function Sidebar({ onNavigate }: SidebarProps) {
     const pathname = usePathname();
-    const [user, setUser] = useState<{ name: string, email: string } | null>(null);
-
-    useEffect(() => {
-        setUser(getUser());
-    }, []);
+    const user = useProfile().profile;
 
     return (
         <aside className="flex flex-col h-full bg-zinc-50/50 backdrop-blur-xl dark:bg-zinc-950/80 border-r border-zinc-200 dark:border-zinc-800">
@@ -79,18 +77,20 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
 
             {/* Footer / Profile */}
             <div className="p-4 mt-auto border-t border-zinc-200 dark:border-zinc-800">
-                <div className="flex items-center gap-3 p-2 rounded-xl bg-white border border-zinc-200 shadow-sm dark:bg-zinc-900 dark:border-zinc-800">
-                    <div className="h-9 w-9 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
-                        <User className="w-4 h-4 text-zinc-500" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium truncate">{user?.name || "User"}</div>
-                        <div className="text-[10px] text-zinc-500 truncate">{user?.email || ""}</div>
-                    </div>
+                <div className="flex items-center gap-2 p-2 rounded-xl bg-white border border-zinc-200 shadow-sm dark:bg-zinc-900 dark:border-zinc-800">
+                    <Link href="/settings" onClick={() => onNavigate?.()} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/60" title="Profile & settings">
+                        <Avatar value={user?.avatar} name={user?.name} size={36} />
+                        <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium truncate">{user?.name || "User"}</div>
+                            <div className="text-xs text-zinc-500 truncate">{user?.email || ""}</div>
+                        </div>
+                    </Link>
                     <button
+                        type="button"
                         onClick={logout}
-                        className="p-1.5 rounded-lg hover:bg-red-50 text-zinc-400 hover:text-red-500 transition dark:hover:bg-red-950/30"
+                        className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
                         title="Log out"
+                        aria-label="Log out"
                     >
                         <LogOut className="w-4 h-4" />
                     </button>

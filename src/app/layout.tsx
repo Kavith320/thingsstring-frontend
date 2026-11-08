@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -37,12 +38,7 @@ export default function RootLayout({
       <head>
         {/* ✅ Dark mode init (runs before paint) */}
         <Script id="theme-init" strategy="beforeInteractive">
-          {`
-            (function () {
-              const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-              document.documentElement.classList.toggle('dark', dark);
-            })();
-          `}
+          {THEME_INIT_SCRIPT}
         </Script>
 
         {/* ✅ Google Identity Services */}

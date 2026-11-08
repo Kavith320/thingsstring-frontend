@@ -3,14 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import StatusPill from "@/components/common/StatusPill";
+import { IconBadge } from "@/components/common/ui";
+import { deviceOnline, deviceUi } from "@/lib/deviceUi";
 import { apiRequest } from "@/lib/api";
 import {
     getLastTelemetryMs,
-    isOnlineFromLastTelemetry,
     formatLastSeen,
 } from "@/lib/utils";
 import { getUser } from "@/lib/auth";
-import { Copy, Check, Plus, X, ChevronRight } from "lucide-react";
+import { Copy, Check, Plus, X, ChevronRight, Radio } from "lucide-react";
 import LoadingSignal from "@/components/LoadingSignal";
 
 /* -------- Types -------- */
@@ -45,6 +46,8 @@ interface DeviceRow {
     online: boolean;
     lastSeenMs: number | null;
     lastTelemetry: Telemetry | null;
+    icon: string | null;
+    color: string | null;
 }
 
 /* -------- UI Components -------- */
@@ -102,14 +105,9 @@ export default function DevicesClient({
     const rows = useMemo(() => {
         return (devices || []).map((d) => {
             const id = d?.deviceId || d?.config?.device?.device_id || d?._id || "-";
-            const name =
-                d?.config?.device?.name ||
-                d?.config?.device?.model ||
-                d?.name ||
-                id ||
-                "Unnamed device";
-
-            const online = isOnlineFromLastTelemetry(d?.last_telemetry);
+            const name = (d as any)?.ui?.displayName || d?.config?.device?.name || d?.config?.device?.model || d?.name || id || "Unnamed device";
+            const ui = deviceUi(d);
+            const online = deviceOnline(d);
             const lastSeenMs = getLastTelemetryMs(d?.last_telemetry);
 
             return {
@@ -118,6 +116,8 @@ export default function DevicesClient({
                 online,
                 lastSeenMs,
                 lastTelemetry: d?.last_telemetry || null,
+                icon: ui.icon,
+                color: ui.color,
             } as DeviceRow;
         });
     }, [devices]);
@@ -257,6 +257,7 @@ export default function DevicesClient({
                             href={`/devices/${encodeURIComponent(r.id)}`}
                             className="group flex min-w-0 items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 transition hover:border-zinc-300 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-zinc-800 dark:bg-zinc-900/40 dark:hover:border-zinc-700"
                         >
+                            <IconBadge icon={r.icon} color={r.color} fallback={Radio} />
                             <div className="min-w-0 flex-1">
                                 <div className="truncate font-semibold text-zinc-900 dark:text-white" title={r.name}>{r.name}</div>
                                 <div className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">
