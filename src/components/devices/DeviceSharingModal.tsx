@@ -1,9 +1,9 @@
 "use client";
 
 /** Members and invitations for one device (manager+). Backend SHARING_FRONTEND_GUIDE.md §2. */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Mail, RotateCw, Trash2, UserPlus, X } from "lucide-react";
-import { ApiError, apiRequest } from "@/lib/api";
+import { ApiError, apiRequest, NetworkError } from "@/lib/api";
 import { Avatar } from "@/lib/icons";
 import { useProfile } from "@/lib/profile";
 import { ROLE_HELP, ROLE_LABELS, type DeviceRole } from "@/lib/deviceUi";
@@ -29,6 +29,9 @@ function SharingBody({ deviceId, deviceName, onClose }: { deviceId: string; devi
     const [busy, setBusy] = useState<string | null>(null);
     const [status, setStatus] = useState<Status>(null);
     const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+    // Synchronous guard: a held Enter key or fast clicks fire several submits before React
+    // re-renders the disabled button, and each one would send another invitation email.
+    const sending = useRef(false);
     const base = `/api/devices/${encodeURIComponent(deviceId)}`;
 
     const load = useCallback(() => {
@@ -49,11 +52,14 @@ function SharingBody({ deviceId, deviceName, onClose }: { deviceId: string; devi
     const assignable: DeviceRole[] = isOwner ? ["viewer", "operator", "manager"] : ["viewer", "operator"];
 
     function explain(e: any): string {
+        if (e instanceof NetworkError) {
+            return "The connection dropped before the server answered, so it may already have been sent. Check the list below before sending again.";
+        }
         if (e instanceof ApiError) {
             if (e.code === "EMAIL_NOT_VERIFIED") return "Verify your own email first (see the banner at the top), then you can invite people.";
             if (e.status === 409) return "That person already has access. Change their role in the list instead.";
             if (e.status === 503) return "Today's email limit is used up. Try again tomorrow.";
-            if (e.status === 429) return "Too many invitations today. Try again tomorrow.";
+            if (e.status === 429) return e.message || "Too many invitations. Try again later.";
         }
         return e?.message || "Something went wrong.";
     }
@@ -63,16 +69,24 @@ function SharingBody({ deviceId, deviceName, onClose }: { deviceId: string; devi
         const to = (again?.email || email).trim();
         const r = again?.role || role;
         if (!/^\S+@\S+\.\S+$/.test(to)) return setStatus({ tone: "error", text: "Enter a valid email address." });
+        if (sending.current) return;
+        sending.current = true;
         setBusy(again ? `resend:${again.id}` : "invite");
         setStatus(null);
         try {
-            await apiRequest(`${base}/invites`, { method: "POST", body: { email: to, role: r }, quiet: true });
-            setStatus({ tone: "success", text: `Invitation ${again ? "sent again" : "sent"} to ${to}. The link works for 7 days.` });
+            const res: any = await apiRequest(`${base}/invites`, { method: "POST", body: { email: to, role: r }, quiet: true });
+            setStatus(
+                res?.alreadySent
+                    ? { tone: "success", text: `An invitation was just sent to ${to}. You can send it again in 2 minutes.` }
+                    : { tone: "success", text: `Invitation ${again ? "sent again" : "sent"} to ${to}. The link works for 7 days.` }
+            );
             if (!again) setEmail("");
             load();
         } catch (err) {
             setStatus({ tone: "error", text: explain(err) });
+            if (err instanceof NetworkError) load(); // show whether it went through
         } finally {
+            sending.current = false;
             setBusy(null);
         }
     }
