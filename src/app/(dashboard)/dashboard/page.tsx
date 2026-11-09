@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { apiRequest } from "@/lib/api";
+import { apiRequest, loadUntilOk } from "@/lib/api";
 import StatusPill from "@/components/common/StatusPill";
 import {
     Thermometer,
@@ -184,6 +184,8 @@ function toRow(d: Device, units: "metric" | "imperial"): DeviceRow {
     };
 }
 
+const GROUPS_LOCAL_KEY = "ts_dashboard_groups";
+
 /* -------- Page -------- */
 export default function DashboardPage() {
     const [devices, setDevices] = useState<Device[]>([]);
@@ -223,15 +225,36 @@ export default function DashboardPage() {
     const rowById = useMemo(() => new Map(allRows.map((r) => [r.id, r])), [allRows]);
 
     // Device groups (sections). Loaded once; the list is edited in the groups dialog.
-    const [groups, setGroups] = useState<DeviceGroup[]>([]);
+    // A browser copy shows them instantly; the server copy keeps retrying through connection
+    // drops, so one failed request no longer leaves the dashboard without its groups.
+    const [groups, setGroupsState] = useState<DeviceGroup[]>([]);
     const [groupsSupported, setGroupsSupported] = useState(true);
     const [managingGroups, setManagingGroups] = useState(false);
+    const setGroups = (next: DeviceGroup[] | ((gs: DeviceGroup[]) => DeviceGroup[])) =>
+        setGroupsState((gs) => {
+            const value = typeof next === "function" ? next(gs) : next;
+            try {
+                localStorage.setItem(GROUPS_LOCAL_KEY, JSON.stringify(value));
+            } catch {
+                // storage blocked: the server copy still works
+            }
+            return value;
+        });
     useEffect(() => {
-        apiRequest("/api/groups", { quiet: true })
-            .then((r: any) => setGroups(Array.isArray(r?.groups) ? r.groups : []))
-            .catch((e) => {
-                if (/not found/i.test(e?.message || "")) setGroupsSupported(false);
-            });
+        try {
+            const cached = JSON.parse(localStorage.getItem(GROUPS_LOCAL_KEY) || "null");
+            // Browser storage is only readable after hydration
+            if (Array.isArray(cached)) setGroupsState(cached);
+        } catch {
+            // no usable copy
+        }
+        return loadUntilOk<{ groups?: DeviceGroup[] }>(
+            "/api/groups",
+            (r) => setGroups(Array.isArray(r?.groups) ? r.groups : []),
+            (e) => {
+                if (/not found/i.test((e as Error)?.message || "")) setGroupsSupported(false);
+            }
+        );
     }, []);
 
     // Grid layout (order, sizes, hidden cards, columns) and its edit mode

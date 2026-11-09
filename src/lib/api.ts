@@ -100,6 +100,45 @@ export async function apiRequest<T = any>(
     return data as T;
 }
 
+/** Worth trying again later: no response at all, or the server/proxy was briefly unavailable. */
+export function isTransient(e: unknown): boolean {
+    return e instanceof NetworkError || (e instanceof ApiError && (e.status >= 500 || e.status === 429));
+}
+
+/**
+ * GET that keeps retrying through connection drops until it succeeds (3 s, 6 s, 12 s … up to
+ * 30 s apart). For data a page loads once and can't do without, like groups or the layout.
+ * Real errors (404, 403 …) go to `onError` at once. Returns a function that stops it (unmount).
+ */
+export function loadUntilOk<T = any>(
+    endpoint: string,
+    onData: (data: T) => void,
+    onError?: (e: unknown) => void
+): () => void {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let delay = 3000;
+    const attempt = async () => {
+        try {
+            const data = await apiRequest<T>(endpoint, { quiet: true });
+            if (!stopped) onData(data);
+        } catch (e) {
+            if (stopped) return;
+            if (isTransient(e)) {
+                timer = setTimeout(attempt, delay);
+                delay = Math.min(delay * 2, 30000);
+            } else {
+                onError?.(e);
+            }
+        }
+    };
+    attempt();
+    return () => {
+        stopped = true;
+        clearTimeout(timer);
+    };
+}
+
 /**
  * Download a file from an authenticated endpoint (a plain <a href> can't send the
  * Bearer token). Saves it in the browser under `filename`. Not retried: exports are
