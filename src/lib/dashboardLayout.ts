@@ -5,8 +5,8 @@
  * Stored as-is by the backend (PUT/GET /api/dashboard, up to 256 KB) and mirrored in
  * localStorage, so it loads instantly and still works on servers without that endpoint.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import { apiRequest } from "@/lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { apiRequest, loadUntilOk } from "@/lib/api";
 
 export type CardSize = "s" | "m" | "l";
 
@@ -54,26 +54,26 @@ function writeLocal(l: DashboardLayout) {
 export function useDashboardLayout() {
     const [layout, setLayout] = useState<DashboardLayout>(DEFAULT_LAYOUT);
     const [serverSupported, setServerSupported] = useState(true);
-    const loaded = useRef(false);
-
     useEffect(() => {
-        if (loaded.current) return;
-        loaded.current = true;
         const local = readLocal();
         // Browser storage is only readable after hydration, so this sync can't happen during render
         // eslint-disable-next-line react-hooks/set-state-in-effect
         if (local) setLayout(local);
-        apiRequest("/api/dashboard", { quiet: true })
-            .then((r: any) => {
+        // Keeps retrying through connection drops, so one failed request doesn't leave the
+        // dashboard on the default layout. Stopped on unmount.
+        return loadUntilOk<{ layout?: unknown }>(
+            "/api/dashboard",
+            (r) => {
                 if (r?.layout) {
                     const l = normalise(r.layout);
                     setLayout(l);
                     writeLocal(l);
                 }
-            })
-            .catch((e) => {
-                if (/not found/i.test(e?.message || "")) setServerSupported(false);
-            });
+            },
+            (e) => {
+                if (/not found/i.test((e as Error)?.message || "")) setServerSupported(false);
+            }
+        );
     }, []);
 
     /** Save a new layout. Resolves when stored; rejects with a message if the server refused it. */
