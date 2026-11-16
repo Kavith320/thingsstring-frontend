@@ -9,12 +9,31 @@ const BACKEND_URL = process.env.BACKEND_URL?.replace(/\/+$/, "");
 
 const nextConfig: NextConfig = {
   reactStrictMode: false,
+  // Public wall screens: never indexed, never leak their address to other sites
+  async headers() {
+    return [
+      {
+        source: "/w",
+        headers: [
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     if (!BACKEND_URL) return [];
     return [{ source: "/backend/:path*", destination: `${BACKEND_URL}/:path*` }];
   },
   turbopack: {
     root: __dirname,
+    // The wall's natural voice (Piper, Emscripten) names Node built-ins in code that only runs under Node
+    resolveAlias: {
+      fs: { browser: "./src/lib/empty-module.js" },
+      path: { browser: "./src/lib/empty-module.js" },
+    },
   },
   experimental: {
     optimizePackageImports: [
