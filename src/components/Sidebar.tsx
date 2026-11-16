@@ -10,6 +10,7 @@ import {
     LogOut,
     Zap,
     Map as MapIcon,
+    MonitorPlay,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { logout } from "@/lib/auth";
@@ -21,6 +22,7 @@ const nav = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/devices", label: "Devices", icon: Radio },
     { href: "/map", label: "Map", icon: MapIcon },
+    { href: "/wall", label: "Wall display", icon: MonitorPlay },
     { href: "/automation", label: "Automation", icon: Zap },
     { href: "/ai", label: "ThingsString AI", icon: Bot },
     { href: "/settings", label: "Settings", icon: Settings },

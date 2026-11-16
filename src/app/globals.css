@@ -257,3 +257,30 @@ html[data-scrolled] .ts-header { box-shadow: 0 1px 0 rgb(0 0 0 / 0.04), 0 8px 24
   html.ts-js [data-reveal] { opacity: 1; transform: none; transition: none; }
   .ts-tick, .ts-path, .ts-lift { animation: none !important; transition: none !important; }
 }
+
+/* ───────────── Wall display (/w and the editor preview) ─────────────
+   Its own colours, independent of the app theme, so the preview shows the wall's theme. */
+.wall-dark {
+  --w-bg: #09090b; --w-card: #141417; --w-card-2: #1c1c21; --w-border: #26262b;
+  --w-text: #fafafa; --w-muted: #a1a1aa; --w-faint: #52525b;
+  --w-on: #22c55e; --w-warn: #f59e0b; --w-crit: #ef4444; --w-accent: var(--w-accent-custom, #e4e4e7);
+  color-scheme: dark;
+}
+.wall-light {
+  --w-bg: #f4f4f5; --w-card: #ffffff; --w-card-2: #f4f4f5; --w-border: #e4e4e7;
+  --w-text: #18181b; --w-muted: #71717a; --w-faint: #a1a1aa;
+  --w-on: #16a34a; --w-warn: #d97706; --w-crit: #dc2626; --w-accent: var(--w-accent-custom, #27272a);
+  color-scheme: light;
+}
+.wall-tile { container-type: size; }
+@keyframes wall-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+.wall-flash { animation: wall-flash 2.2s ease-out forwards; }
+@keyframes wall-alarm { 0%, 100% { box-shadow: inset 0 0 0 2px var(--w-crit); } 50% { box-shadow: inset 0 0 0 6px var(--w-crit); } }
+.wall-alarm { animation: wall-alarm 1.4s ease-in-out infinite; }
+@keyframes wall-feed-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+.wall-feed-in { animation: wall-feed-in 400ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .wall-flash, .wall-feed-in { animation: none !important; opacity: 0; }
+  .wall-feed-in { opacity: 1; }
+  .wall-alarm { animation: none !important; box-shadow: inset 0 0 0 4px var(--w-crit); }
+}
