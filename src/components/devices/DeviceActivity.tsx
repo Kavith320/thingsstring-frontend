@@ -2,7 +2,7 @@
 
 /** Who did what on a device (manager+). Backend SHARING_FRONTEND_GUIDE.md §5. */
 import { useCallback, useEffect, useState } from "react";
-import { Bot, CalendarClock, Download, Lock, Share2, ShieldCheck, ToggleRight, User, Zap } from "lucide-react";
+import { Bot, CalendarClock, Cpu, Download, Lock, Share2, ShieldCheck, ToggleRight, User, Zap } from "lucide-react";
 import { ApiError, apiRequest } from "@/lib/api";
 import { cn, formatLastSeen, humanizeKey } from "@/lib/utils";
 import { Button, Notice } from "@/components/common/ui";
@@ -10,7 +10,7 @@ import { Button, Notice } from "@/components/common/ui";
 interface Entry {
     ts: string;
     action: string;
-    actor?: { type: "user" | "admin" | "automation" | "schedule"; id?: string; email?: string; name?: string };
+    actor?: { type: "user" | "admin" | "automation" | "schedule" | "device"; id?: string; email?: string; name?: string };
     details?: any;
 }
 
@@ -20,7 +20,14 @@ const FILTERS = [
     { id: "schedule", label: "Schedules" },
     { id: "automation", label: "Automations" },
     { id: "share", label: "Sharing" },
+    { id: "device", label: "Board" },
 ];
+
+// What a board reported about itself (actor "device", action "device.<type>")
+const DEVICE_TYPE_TEXT: Record<string, string> = {
+    SYSTEM: "System", SD: "SD card", SENSOR: "Sensor", RELAY: "Relays", WIFI: "Wi-Fi",
+    CLOUD: "Cloud", USER: "On the board", SETTING: "Setting", OTHER: "Board",
+};
 
 const ACTION_TEXT: Record<string, string> = {
     "control.update": "changed outputs",
@@ -40,9 +47,12 @@ const ACTION_TEXT: Record<string, string> = {
     "telemetry.export": "downloaded the data (CSV)",
     "admin.lock": "locked the device",
     "admin.unlock": "unlocked the device",
+    "device.command": "sent a command to the board",
 };
 
 function iconFor(e: Entry) {
+    if (e.actor?.type === "device") return Cpu;
+    if (e.action === "device.command") return Download;
     if (e.actor?.type === "automation") return Bot;
     if (e.actor?.type === "schedule") return CalendarClock;
     if (e.actor?.type === "admin") return ShieldCheck;
@@ -61,12 +71,15 @@ function actorName(e: Entry) {
     if (a.type === "automation") return `Automation “${a.name || "rule"}”`;
     if (a.type === "schedule") return `Schedule “${a.name || "schedule"}”`;
     if (a.type === "admin") return `Admin${a.name ? ` ${a.name}` : ""}`;
+    if (a.type === "device") return "Board";
     return a.name || a.email || "Someone";
 }
 
 /** One-line summary of the details we know how to read. */
 function detailText(e: Entry): string {
     const d = e.details || {};
+    if (e.actor?.type === "device") return DEVICE_TYPE_TEXT[d.type] || "";
+    if (e.action === "device.command") return d.action === "update" ? "Install the firmware update" : "Check for a firmware update";
     const parts: string[] = [];
     if (d.actuators && typeof d.actuators === "object") {
         for (const [k, v] of Object.entries<any>(d.actuators)) {
@@ -179,7 +192,7 @@ export default function DeviceActivity({ deviceId }: { deviceId: string }) {
                                     <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"><Icon className="h-4 w-4" /></span>
                                     <div className="min-w-0 flex-1">
                                         <p className="text-sm text-zinc-800 dark:text-zinc-200">
-                                            <b className="font-semibold">{actorName(e)}</b> {ACTION_TEXT[e.action] || e.action}
+                                            <b className="font-semibold">{actorName(e)}</b> {e.actor?.type === "device" ? e.details?.msg : ACTION_TEXT[e.action] || e.action}
                                         </p>
                                         {detail && <p className="truncate text-xs text-zinc-500" title={detail}>{detail}</p>}
                                     </div>

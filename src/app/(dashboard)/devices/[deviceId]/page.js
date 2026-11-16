@@ -11,6 +11,7 @@ import DeviceCustomizeModal from "@/components/devices/DeviceCustomizeModal";
 import { arrangeEntries, deviceDisplayName, deviceOnline, deviceUi, deviceRole, canControl, canManageSharing, ROLE_LABELS } from "@/lib/deviceUi";
 import DeviceSharingModal from "@/components/devices/DeviceSharingModal";
 import DeviceActivity from "@/components/devices/DeviceActivity";
+import BoardPanel, { boardRelayText } from "@/components/devices/BoardPanel";
 
 import TelemetryGraph from "@/components/devices/TelemetryGraph";
 import SensorsGrid from "@/components/devices/SensorsGrid";
@@ -277,7 +278,8 @@ export default function DeviceDetailsPage() {
       // Saved order/labels first; hidden controls are left out (they still run from schedules)
       actuatorEntries: arrangeEntries(Object.keys(controlActuators), ui.actuators).filter((e) => e.visible),
       model: dev?.model || "-",
-      firmware: dev?.firmware || "-",
+      firmware: dev?.firmware || dev?.fw || "-",
+      board: cfg?.board && typeof cfg.board === "object" ? cfg.board : null,
       cfgActuators: cfg?.actuators || {},
       controlActuators: control?.actuators || {},
       telemetryActuators: last?.actuators || {},
@@ -580,13 +582,17 @@ export default function DeviceDetailsPage() {
                   <p className="mt-2 min-h-4 text-xs text-zinc-500 dark:text-zinc-400">
                     {!meta.canControl ? (
                       <span className="inline-flex items-center gap-1"><Eye className="h-3.5 w-3.5" aria-hidden /> View only: you&apos;re a {ROLE_LABELS[meta.role]}</span>
-                    ) : auto ? "Controlled by schedules and automations" : "You control this actuator"}
+                    ) : boardRelayText(meta.board?.relays?.[actKey]) || (auto ? "Controlled by schedules and automations" : "You control this actuator")}
                   </p>
                 </div>
               );
             })}
           </div>
         </Card>
+      )}
+
+      {meta.board && (
+        <BoardPanel deviceId={meta.id} board={meta.board} firmware={meta.firmware} online={meta.online} canManage={meta.canManage} />
       )}
 
       {/* Sensors */}
