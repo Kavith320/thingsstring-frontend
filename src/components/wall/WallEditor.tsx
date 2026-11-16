@@ -328,7 +328,8 @@ export default function WallEditor() {
                                     page={previewPage}
                                     columns={config.display.columns}
                                     now={now}
-                                    rowHeight={140}
+                                    rowHeight={150}
+                                    textScale={config.display.textScale}
                                     editor={{
                                         selected,
                                         onSelect: (id) => setSelected((s) => (s === id ? null : id)),
