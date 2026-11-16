@@ -389,7 +389,7 @@ export default function WallScreen() {
                 {/* Body */}
                 <div className="flex min-h-0 flex-1 gap-3">
                     <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-                        <WallGrid data={data} page={page} columns={cols} now={now} flashes={flashes} highlightMs={display.highlightSec * 1000} fill={width >= 640} />
+                        <WallGrid data={data} page={page} columns={cols} now={now} flashes={flashes} highlightMs={display.highlightSec * 1000} fill={width >= 640} textScale={display.textScale} />
                     </main>
                     {showFeedPanel && (
                         <aside className="flex w-80 shrink-0 flex-col gap-2 overflow-hidden" aria-label="Recent events">
@@ -416,7 +416,7 @@ export default function WallScreen() {
             )}
 
             {needsStart && (
-                <div className="fixed inset-0 z-40 grid place-items-center p-6" style={{ background: "color-mix(in srgb, var(--w-bg) 80%, transparent)" }}>
+                <div className="fixed inset-0 z-40 grid place-items-center p-6" style={{ background: "var(--w-overlay)" }}>
                     <div className="w-full max-w-sm rounded-3xl border p-6 text-center shadow-2xl" style={{ background: "var(--w-card)", borderColor: "var(--w-border)" }}>
                         <Volume2 className="mx-auto h-8 w-8" />
                         <h2 className="mt-3 text-lg font-semibold">This wall plays sounds</h2>
