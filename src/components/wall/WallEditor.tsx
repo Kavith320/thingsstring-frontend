@@ -2,28 +2,40 @@
 
 /** Wall display editor (/wall): tiles, look, sounds and voice, and the public link. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Copy, Pencil, Plus, Trash2, Volume2 } from "lucide-react";
+import { Copy, FolderPlus, Monitor, Pencil, Plus, Trash2, Ungroup, Volume2 } from "lucide-react";
 import { ApiError, apiRequest } from "@/lib/api";
 import { Button, ColorPicker, Field, Input, Notice, Select } from "@/components/common/ui";
 import Switch from "@/components/common/Switch";
 import { deviceDisplayName, deviceId, deviceOnline, getPath } from "@/lib/deviceUi";
-import { cn, getLastTelemetryMs, isActuatorAuto, toOnOff } from "@/lib/utils";
+import { cn, getLastTelemetryMs, humanizeKey, isActuatorAuto, toOnOff } from "@/lib/utils";
 import {
+    Cell,
     DEFAULT_DISPLAY,
+    RESOLUTIONS,
+    WallCanvas,
     WallConfig,
     WallData,
     WallDisplay,
+    WallGroup,
     WallTile,
+    crossesGroup,
+    groupOf,
+    overlaps,
     listVoices,
     newId,
     normaliseDisplay,
     playTone,
     announceVoice,
+    autoRows,
+    layoutTiles,
+    regrid,
     speechSupported,
     unlockAudio,
+    withPositions,
 } from "@/lib/wall";
-import { WallGrid, themeStyle, useWallTheme } from "@/components/wall/WallView";
-import { AddTileModal, Segmented, TileEditModal, publishable } from "@/components/wall/WallTileModals";
+import { themeStyle, useWallTheme } from "@/components/wall/WallView";
+import WallLayoutEditor from "@/components/wall/WallLayoutEditor";
+import { AddTileModal, GroupEditModal, Segmented, TileEditModal, publishable } from "@/components/wall/WallTileModals";
 import WallLinkPanel, { WallMeta } from "@/components/wall/WallLinkPanel";
 import { NATURAL_VOICES, isNaturalVoiceDownloaded, loadNaturalVoice, naturalVoiceSupported, speakNatural } from "@/lib/naturalVoice";
 
@@ -93,18 +105,22 @@ type Tab = "tiles" | "look" | "sound";
 const EMPTY: WallConfig = { title: "Wall display", display: DEFAULT_DISPLAY, pages: [{ id: "p1", title: null, tiles: [] }] };
 
 function fromServer(w: any): WallConfig {
+    const display = normaliseDisplay(w?.display);
+    const pages: WallConfig["pages"] = Array.isArray(w?.pages) && w.pages.length ? w.pages : EMPTY.pages;
+    // Older walls have no positions yet: fix them where the screen already shows them
     return {
         title: w?.title || "Wall display",
-        display: normaliseDisplay(w?.display),
-        pages: Array.isArray(w?.pages) && w.pages.length ? w.pages : EMPTY.pages,
+        display,
+        pages: pages.map((p) => ({ ...p, groups: p.groups || [], tiles: withPositions(p.tiles, display.canvas.cols, display.canvas.rows, p.groups || []) })),
     };
 }
 
 /** Owner-side preview data, from the device list (same values the screen will show). */
-function previewData(config: WallConfig, devices: any[]): WallData {
+function previewData(config: WallConfig, devices: any[], graphHistory: WallData["history"] = {}): WallData {
     const allowed = new Map(publishable(devices).map((d) => [deviceId(d), d]));
     const devs: WallData["devices"] = {};
     const values: WallData["values"] = {};
+    const history: WallData["history"] = {};
     for (const [id, d] of allowed) {
         const seen = getLastTelemetryMs(d.last_telemetry);
         devs[id] = { name: deviceDisplayName(d), online: deviceOnline(d), lastSeen: seen ? new Date(seen).toISOString() : null };
@@ -112,6 +128,20 @@ function previewData(config: WallConfig, devices: any[]): WallData {
     const pages = config.pages.map((p) => ({
         ...p,
         tiles: p.tiles.map((t) => {
+            if (t.type === "graph") {
+                // Lines of devices you can publish; the preview starts from the current reading
+                const series = (t.series || [])
+                    .map((x, i) => ({ ...x, id: `${t.id}.${i}`, dev: x.deviceId }))
+                    .filter((x) => x.deviceId && allowed.has(x.deviceId))
+                    .map((x) => {
+                        const d = allowed.get(x.deviceId!);
+                        const v = getPath(d.last_telemetry, x.key || "");
+                        if (graphHistory[x.id]?.length) history[x.id] = graphHistory[x.id];
+                        else if (typeof v === "number") history[x.id] = [[Date.now(), v]];
+                        return { ...x, label: x.label || humanizeKey((x.key || "").split(".").pop() || "") };
+                    });
+                return series.length ? { ...t, series } : { ...t, unavailable: true };
+            }
             if (!t.deviceId) return t;
             const d = allowed.get(t.deviceId);
             if (!d) return { ...t, unavailable: true };
@@ -126,7 +156,7 @@ function previewData(config: WallConfig, devices: any[]): WallData {
             return { ...t, dev: t.deviceId };
         }),
     }));
-    return { wall: { ...config, pages }, devices: devs, values, history: {} };
+    return { wall: { ...config, pages }, devices: devs, values, history };
 }
 
 export default function WallEditor() {
@@ -139,6 +169,8 @@ export default function WallEditor() {
     const [pageIdx, setPageIdx] = useState(0);
     const [selected, setSelected] = useState<string | null>(null);
     const [editing, setEditing] = useState<string | null>(null);
+    const [editingGroup, setEditingGroup] = useState<string | null>(null);
+    const [notice, setNotice] = useState("");
     const [adding, setAdding] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
@@ -193,14 +225,99 @@ export default function WallEditor() {
     }, [dirty]);
 
     const page = config.pages[Math.min(pageIdx, config.pages.length - 1)];
-    const data = useMemo(() => previewData(config, devices), [config, devices]);
+    // Graph tiles in the preview show the real history (the screen gets it from the server)
+    const [graphHistory, setGraphHistory] = useState<WallData["history"]>({});
+    const graphWanted = JSON.stringify(
+        config.pages.flatMap((p) => p.tiles.filter((t) => t.type === "graph").flatMap((t) => (t.series || []).map((x, i) => [`${t.id}.${i}`, x.deviceId, x.key, t.rangeH || 24])))
+    );
+    useEffect(() => {
+        let alive = true;
+        const wanted = JSON.parse(graphWanted) as [string, string, string, number][];
+        const docs = new Map<string, Promise<any[]>>();
+        const load = (dev: string, hours: number) => {
+            const k = `${dev}|${hours}`;
+            if (!docs.has(k)) {
+                const from = Date.now() - hours * 3600 * 1000;
+                docs.set(k, apiRequest(`/api/devices/${encodeURIComponent(dev)}/telemetry?from=${from}&maxPoints=240`, { quiet: true }).then((r: any) => r?.telemetry || r?.items || []).catch(() => []));
+            }
+            return docs.get(k)!;
+        };
+        Promise.all(
+            wanted.map(async ([id, dev, key, hours]) => {
+                const rows = await load(dev, hours);
+                const pts = rows
+                    .map((r: any) => [Date.parse(r.createdAt || r.ts), getPath(r, key)] as [number, any])
+                    .filter(([t, v]: [number, any]) => Number.isFinite(t) && typeof v === "number")
+                    .sort((a: [number, number], b: [number, number]) => a[0] - b[0]);
+                return [id, pts] as const;
+            })
+        ).then((list) => alive && setGraphHistory(Object.fromEntries(list)));
+        return () => {
+            alive = false;
+        };
+    }, [graphWanted]);
+    const data = useMemo(() => previewData(config, devices, graphHistory), [config, devices, graphHistory]);
     const previewPage = data.wall.pages[Math.min(pageIdx, data.wall.pages.length - 1)];
     const theme = useWallTheme(config.display.theme);
     const editingTile = page.tiles.find((t) => t.id === editing) || null;
+    const editingGroupObj = (page.groups || []).find((g) => g.id === editingGroup) || null;
 
     const setDisplay = (p: Partial<WallDisplay>) => setConfig((c) => ({ ...c, display: { ...c.display, ...p } }));
+    // Every change gives new tiles a free spot, so what's saved is what the screen shows
     const setTiles = (fn: (tiles: WallTile[]) => WallTile[]) =>
-        setConfig((c) => ({ ...c, pages: c.pages.map((p, i) => (i === Math.min(pageIdx, c.pages.length - 1) ? { ...p, tiles: fn(p.tiles) } : p)) }));
+        setConfig((c) => ({
+            ...c,
+            pages: c.pages.map((p, i) => (i === Math.min(pageIdx, c.pages.length - 1) ? { ...p, tiles: withPositions(fn(p.tiles), c.display.canvas.cols, c.display.canvas.rows, p.groups || []) } : p)),
+        }));
+    const setGroups = (fn: (groups: WallGroup[]) => WallGroup[]) =>
+        setConfig((c) => ({ ...c, pages: c.pages.map((p, i) => (i === Math.min(pageIdx, c.pages.length - 1) ? { ...p, groups: fn(p.groups || []) } : p)) }));
+    const setCanvas = (next: Partial<WallCanvas>) =>
+        setConfig((c) => {
+            const from = c.display.canvas;
+            const to = { ...from, ...next };
+            // A different screen shape keeps tile shapes; a finer or coarser grid stretches
+            const mode = to.width !== from.width || to.height !== from.height ? "keep" : "stretch";
+            return { ...c, display: { ...c.display, canvas: to }, pages: c.pages.map((p) => regrid(p, from, to, mode)) };
+        });
+    // Tiles and groups that moved, in one change
+    const moveTiles = (cells: Record<string, Cell>) =>
+        setConfig((c) => ({
+            ...c,
+            pages: c.pages.map((p, i) => {
+                if (i !== Math.min(pageIdx, c.pages.length - 1)) return p;
+                const groups = (p.groups || []).map((g) => (cells[g.id] ? { ...g, ...cells[g.id] } : g));
+                const tiles = p.tiles.map((t) => (cells[t.id] ? { ...t, ...cells[t.id] } : t));
+                return { ...p, groups, tiles: withPositions(tiles, c.display.canvas.cols, c.display.canvas.rows, groups) };
+            }),
+        }));
+
+    /** A new group: around the selected tile, or in the first free area. */
+    function addGroup() {
+        const { cols, rows } = config.display.canvas;
+        const groups = page.groups || [];
+        if (groups.length >= 16) return setNotice("A page can have at most 16 groups.");
+        const placedTiles = page.tiles.filter((t) => Number.isInteger(t.x)) as (WallTile & Cell)[];
+        const sel = placedTiles.find((t) => t.id === selected);
+        let area: Cell | null = null;
+        if (sel && !groupOf(sel, groups)) area = { x: sel.x, y: sel.y, w: sel.w, h: sel.h };
+        else {
+            // Somewhere no other group is, and no tile would end up across its edge
+            for (const [w, h] of [[4, 3], [4, 2], [3, 2], [2, 2], [2, 1]]) {
+                for (let y = 0; !area && y + h <= rows; y++)
+                    for (let x = 0; !area && x + w <= cols; x++) {
+                        const c = { x, y, w, h };
+                        if (!groups.some((g) => overlaps(g, c)) && !placedTiles.some((t) => crossesGroup(t, [c]))) area = c;
+                    }
+                if (area) break;
+            }
+        }
+        if (!area) return setNotice("There's no room for a group here. Make some space, or select a tile first to group it.");
+        const g: WallGroup = { id: newId("g"), label: "New group", icon: null, color: null, ...area };
+        setGroups((gs) => [...gs, g]);
+        setSelected(g.id);
+        setEditingGroup(g.id);
+        setNotice("");
+    }
 
     async function save(): Promise<boolean> {
         setSaving(true);
@@ -221,22 +338,13 @@ export default function WallEditor() {
         }
     }
 
-    function move(id: string, by: number) {
-        setTiles((tiles) => {
-            const i = tiles.findIndex((t) => t.id === id);
-            const j = i + by;
-            if (i < 0 || j < 0 || j >= tiles.length) return tiles;
-            const out = tiles.slice();
-            [out[i], out[j]] = [out[j], out[i]];
-            return out;
-        });
-    }
-
     if (state === "loading") return <div className="space-y-3">{[0, 1, 2].map((i) => <div key={i} className="h-24 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-800" />)}</div>;
     if (state === "unsupported") return <Notice tone="warning">The server doesn&apos;t support wall displays yet. Update the backend to use this page.</Notice>;
     if (state === "error") return <Notice tone="error">{error}</Notice>;
 
     const tileCount = config.pages.reduce((n, p) => n + p.tiles.length, 0);
+    const { cols, rows } = config.display.canvas;
+    const overflow = layoutTiles(page.tiles, cols, rows, page.groups || []).overflow;
 
     return (
         <div className="space-y-6">
@@ -310,48 +418,67 @@ export default function WallEditor() {
                         </div>
                     )}
 
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm text-zinc-500">Live preview. Click a tile to edit, move or remove it.</p>
-                        <Button variant="primary" onClick={() => setAdding(true)} disabled={page.tiles.length >= 48}><Plus className="h-4 w-4" /> Add tile</Button>
-                    </div>
+                    <CanvasSettings canvas={config.display.canvas} onChange={setCanvas} />
 
-                    {/* Preview in the wall's own theme */}
-                    <div className={cn("overflow-hidden rounded-2xl border border-zinc-200 p-3 sm:p-4 dark:border-zinc-800", theme === "light" ? "wall-light" : "wall-dark")} style={themeStyle(config.display)}>
-                        <div className="mb-3 flex items-center justify-between px-1">
-                            <div className="truncate text-lg font-semibold">{config.title || "Wall display"}</div>
-                            {config.display.showClock && <div className="text-sm font-semibold tabular-nums">{new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm text-zinc-500">Drag tiles to move them, drag a corner to resize, drop one on another to swap. Drag a group by its frame to move it with its tiles. Double-click to edit.</p>
+                        <div className="flex gap-2">
+                            <Button onClick={addGroup} title="Group the selected tile, or add an empty group"><FolderPlus className="h-4 w-4" /> Add group</Button>
+                            <Button variant="primary" onClick={() => setAdding(true)} disabled={page.tiles.length >= 48}><Plus className="h-4 w-4" /> Add tile</Button>
                         </div>
-                        <div className="-mx-1 overflow-x-auto px-1">
-                            <div style={{ minWidth: config.display.columns * 150 }}>
-                                <WallGrid
-                                    data={data}
-                                    page={previewPage}
-                                    columns={config.display.columns}
-                                    now={now}
-                                    rowHeight={150}
-                                    textScale={config.display.textScale}
-                                    editor={{
-                                        selected,
-                                        onSelect: (id) => setSelected((s) => (s === id ? null : id)),
-                                        actions: (t) =>
-                                            selected === t.id ? (
-                                                <div className="flex gap-1 rounded-xl border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900" onClick={(e) => e.stopPropagation()}>
-                                                    <ToolBtn label="Edit" onClick={() => setEditing(t.id)}><Pencil className="h-4 w-4" /></ToolBtn>
-                                                    <ToolBtn label="Move earlier" onClick={() => move(t.id, -1)}><ArrowLeft className="h-4 w-4" /></ToolBtn>
-                                                    <ToolBtn label="Move later" onClick={() => move(t.id, 1)}><ArrowRight className="h-4 w-4" /></ToolBtn>
-                                                    <ToolBtn
-                                                        label="Duplicate"
-                                                        onClick={() => setTiles((tiles) => { const i = tiles.findIndex((x) => x.id === t.id); const copy = { ...tiles[i], id: newId() }; return [...tiles.slice(0, i + 1), copy, ...tiles.slice(i + 1)]; })}
-                                                    >
-                                                        <Copy className="h-4 w-4" />
-                                                    </ToolBtn>
-                                                    <ToolBtn label="Remove" onClick={() => { setTiles((tiles) => tiles.filter((x) => x.id !== t.id)); setSelected(null); }}><Trash2 className="h-4 w-4 text-red-600" /></ToolBtn>
-                                                </div>
-                                            ) : null,
-                                    }}
-                                />
-                            </div>
-                        </div>
+                    </div>
+                    {notice && <Notice tone="warning">{notice}</Notice>}
+                    {overflow.length > 0 && (
+                        <Notice tone="warning">
+                            {overflow.length === 1 ? "1 tile doesn't" : `${overflow.length} tiles don't`} fit on this page ({overflow.map((t) => t.label || t.type).join(", ")}). Make room by shrinking tiles, add more rows, or move it to another page.
+                        </Notice>
+                    )}
+
+                    {/* Exactly what the screen shows, in the wall's own theme */}
+                    <div className={cn("rounded-2xl border border-zinc-200 p-2 dark:border-zinc-800", theme === "light" ? "wall-light" : "wall-dark")} style={themeStyle(config.display)}>
+                        <WallLayoutEditor
+                            data={data}
+                            page={previewPage}
+                            display={config.display}
+                            title={config.title}
+                            now={now}
+                            selected={selected}
+                            onSelect={setSelected}
+                            onMove={moveTiles}
+                            onEdit={setEditing}
+                            onEditGroup={setEditingGroup}
+                            toolbar={(id) => {
+                                const g = (page.groups || []).find((x) => x.id === id);
+                                if (g)
+                                    return (
+                                        <div className="flex gap-1 rounded-xl border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+                                            <ToolBtn label="Edit group" onClick={() => setEditingGroup(g.id)}><Pencil className="h-4 w-4" /></ToolBtn>
+                                            <ToolBtn label="Remove group (keeps its tiles)" onClick={() => { setGroups((gs) => gs.filter((x) => x.id !== g.id)); setSelected(null); }}><Ungroup className="h-4 w-4" /></ToolBtn>
+                                        </div>
+                                    );
+                                const t = page.tiles.find((x) => x.id === id);
+                                if (!t) return null;
+                                return (
+                                <div className="flex gap-1 rounded-xl border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+                                    <ToolBtn label="Edit" onClick={() => setEditing(t.id)}><Pencil className="h-4 w-4" /></ToolBtn>
+                                    <ToolBtn
+                                        label="Duplicate"
+                                        onClick={() =>
+                                            setTiles((tiles) => {
+                                                const i = tiles.findIndex((x) => x.id === t.id);
+                                                // Same size, in the next free spot
+                                                const copy = { ...tiles[i], id: newId(), x: undefined, y: undefined };
+                                                return [...tiles.slice(0, i + 1), copy, ...tiles.slice(i + 1)];
+                                            })
+                                        }
+                                    >
+                                        <Copy className="h-4 w-4" />
+                                    </ToolBtn>
+                                    <ToolBtn label="Remove" onClick={() => { setTiles((tiles) => tiles.filter((x) => x.id !== t.id)); setSelected(null); }}><Trash2 className="h-4 w-4 text-red-600" /></ToolBtn>
+                                </div>
+                                );
+                            }}
+                        />
                     </div>
                 </div>
             )}
@@ -373,10 +500,80 @@ export default function WallEditor() {
                     key={editingTile.id}
                     tile={editingTile}
                     onClose={() => setEditing(null)}
+                    devices={devices}
                     onSave={(t) => { setTiles((tiles) => tiles.map((x) => (x.id === t.id ? t : x))); setEditing(null); }}
                     onDelete={() => { setTiles((tiles) => tiles.filter((x) => x.id !== editingTile.id)); setEditing(null); setSelected(null); }}
                 />
             )}
+            {editingGroupObj && (
+                <GroupEditModal
+                    key={editingGroupObj.id}
+                    group={editingGroupObj}
+                    onClose={() => setEditingGroup(null)}
+                    onSave={(g) => { setGroups((gs) => gs.map((x) => (x.id === g.id ? g : x))); setEditingGroup(null); }}
+                    onDelete={() => { setGroups((gs) => gs.filter((x) => x.id !== editingGroupObj.id)); setEditingGroup(null); setSelected(null); }}
+                />
+            )}
+        </div>
+    );
+}
+
+/** Which screen the wall is for, and how finely it's split into cells. */
+function CanvasSettings({ canvas, onChange }: { canvas: WallCanvas; onChange: (c: Partial<WallCanvas>) => void }) {
+    const preset = RESOLUTIONS.find((r) => r.width === canvas.width && r.height === canvas.height);
+    const [custom, setCustom] = useState(!preset);
+    const [w, setW] = useState(String(canvas.width));
+    const [h, setH] = useState(String(canvas.height));
+    const applyCustom = () => {
+        const W = Math.round(Number(w));
+        const H = Math.round(Number(h));
+        if (W >= 320 && W <= 7680 && H >= 320 && H <= 7680) onChange({ width: W, height: H, rows: autoRows({ width: W, height: H, cols: canvas.cols }) });
+    };
+    return (
+        <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm sm:p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+            <Field label="Screen" className="w-full sm:w-72">
+                {(id) => (
+                    <Select
+                        id={id}
+                        value={custom ? "custom" : preset?.id || "custom"}
+                        onChange={(e) => {
+                            const r = RESOLUTIONS.find((x) => x.id === e.target.value);
+                            if (!r) return setCustom(true);
+                            setCustom(false);
+                            setW(String(r.width));
+                            setH(String(r.height));
+                            onChange({ width: r.width, height: r.height, rows: autoRows({ width: r.width, height: r.height, cols: canvas.cols }) });
+                        }}
+                    >
+                        {RESOLUTIONS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+                        <option value="custom">Custom size…</option>
+                    </Select>
+                )}
+            </Field>
+            {custom && (
+                <div className="flex items-end gap-2">
+                    <Field label="Width" className="w-24">{(id) => <Input id={id} inputMode="numeric" value={w} onChange={(e) => setW(e.target.value.replace(/\D/g, ""))} onBlur={applyCustom} />}</Field>
+                    <span className="pb-2.5 text-zinc-400">×</span>
+                    <Field label="Height" className="w-24">{(id) => <Input id={id} inputMode="numeric" value={h} onChange={(e) => setH(e.target.value.replace(/\D/g, ""))} onBlur={applyCustom} />}</Field>
+                </div>
+            )}
+            <Field label="Columns" className="w-28">
+                {(id) => (
+                    <Select id={id} value={String(canvas.cols)} onChange={(e) => { const c = Number(e.target.value); onChange({ cols: c, rows: autoRows({ width: canvas.width, height: canvas.height, cols: c }) }); }}>
+                        {[4, 6, 8, 10, 12, 16, 20, 24].map((n) => <option key={n} value={n}>{n}</option>)}
+                    </Select>
+                )}
+            </Field>
+            <Field label="Rows" className="w-28">
+                {(id) => (
+                    <Select id={id} value={String(canvas.rows)} onChange={(e) => onChange({ rows: Number(e.target.value) })}>
+                        {Array.from({ length: 23 }, (_, i) => i + 2).map((n) => <option key={n} value={n}>{n}</option>)}
+                    </Select>
+                )}
+            </Field>
+            <p className="flex min-w-0 basis-full items-center gap-1.5 text-xs text-zinc-500">
+                <Monitor className="h-3.5 w-3.5 shrink-0" /> The canvas takes this screen&apos;s shape. Other screens scale it to fit; phones stack the tiles instead. More columns and rows give finer control.
+            </p>
         </div>
     );
 }
@@ -412,18 +609,22 @@ function LookSettings({ d, set }: { d: WallDisplay; set: (p: Partial<WallDisplay
             <Row title="Highlight colour" help="Used to light up tiles that just changed">
                 <ColorPicker value={d.accent} onChange={(v) => set({ accent: v })} />
             </Row>
-            <Row title="Columns" help="On wide screens. Phones always use 2.">
-                <Segmented value={String(d.columns)} onChange={(v) => set({ columns: Number(v) })} options={[2, 3, 4, 5, 6, 8].map((n) => ({ id: String(n), label: String(n) }))} />
-            </Row>
             <Row title="Text size" help={`${Math.round(d.textScale * 100)}%`}>
                 <input type="range" min={0.75} max={1.6} step={0.05} value={d.textScale} onChange={(e) => set({ textScale: Number(e.target.value) })} className="w-56 accent-zinc-900 dark:accent-white" aria-label="Text size" />
             </Row>
             <Row title="Clock in the header">
                 <Switch checked={d.showClock} onChange={(v) => set({ showClock: v })} ariaLabel="Clock in the header" />
             </Row>
-            <Row title="Recent events panel" help="A list of what changed, on screens wider than 1280px. Smaller screens show the latest one briefly.">
-                <Switch checked={d.showFeed} onChange={(v) => set({ showFeed: v })} ariaLabel="Recent events panel" />
+            <Row title="Pop-up notifications" help="What changed pops up in the corner, then disappears by itself">
+                <Switch checked={d.showFeed} onChange={(v) => set({ showFeed: v })} ariaLabel="Pop-up notifications" />
             </Row>
+            {d.showFeed && (
+                <Row title="Notifications stay for">
+                    <Select value={String(d.notifySec)} onChange={(e) => set({ notifySec: Number(e.target.value) })} className="w-40" aria-label="Notifications stay for">
+                        {[4, 6, 8, 12, 20, 30, 60].map((n) => <option key={n} value={n}>{n} seconds</option>)}
+                    </Select>
+                </Row>
+            )}
             <Row title="Highlight changes for" help="How long a tile stays lit after its value changes">
                 <Select value={String(d.highlightSec)} onChange={(e) => set({ highlightSec: Number(e.target.value) })} className="w-40" aria-label="Highlight duration">
                     {[2, 4, 6, 10, 20, 30].map((n) => <option key={n} value={n}>{n} seconds</option>)}
@@ -459,7 +660,9 @@ function SoundSettings({ d, set }: { d: WallDisplay; set: (p: Partial<WallDispla
 
     return (
         <div className="space-y-4">
-            <Notice tone="info">A screen plays sound only after someone taps it once (browsers block it otherwise), so the wall shows a “Start with sound” button when it opens.</Notice>
+            <Notice tone="info">
+                Sound starts on its own; anyone at the screen can mute it with the speaker button. Some browsers hold sound back until the screen is touched once: the wall then shows “Tap anywhere for sound” in its header, and any tap, click or remote key turns it on.
+            </Notice>
             <div className={card}>
                 <Row title="Sound" help="A short tone when something changes">
                     <Switch checked={s.enabled} onChange={(x) => set({ sound: { ...s, enabled: x } })} ariaLabel="Sound" />

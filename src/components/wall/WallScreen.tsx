@@ -8,31 +8,39 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Expand, Loader2, Lock, Minimize, Volume2, VolumeX, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
+    FLOW,
     FeedEvent,
+    STAGE,
     StreamStatus,
     WallApiError,
     WallData,
     announceVoice,
     applyUpdate,
     audioReady,
+    canvasRects,
     changedTiles,
     connectWall,
     createWallSession,
     diffEvents,
+    flowLayout,
+    geometry,
     inQuietHours,
+    layoutTiles,
     normaliseDisplay,
     playTone,
+    stageSize,
+    startAudioWhenAllowed,
     unlockAudio,
     wantsAnnounce,
 } from "@/lib/wall";
-import { FeedList, WallGrid, themeStyle, useWallTheme } from "@/components/wall/WallView";
+import { ScaledStage, StageHeader, StageTiles, StageToasts, Toast, themeStyle, useWallTheme } from "@/components/wall/WallView";
 import { loadNaturalVoice, naturalVoiceSupported } from "@/lib/naturalVoice";
 
 type Phase = "init" | "pin" | "ready" | "gone" | "nolink" | "error";
 
 const SESSION_PREFIX = "ts_wall_session:";
 const MUTE_KEY = "ts_wall_muted";
-const FEED_MAX = 40;
+const TOASTS_MAX = 4;
 
 function storeKey(token: string) {
     return SESSION_PREFIX + token.slice(0, 16);
@@ -63,17 +71,17 @@ export default function WallScreen() {
     const [data, setData] = useState<WallData | null>(null);
     const dataRef = useRef<WallData | null>(null);
     const [conn, setConn] = useState<StreamStatus>("connecting");
-    const [feed, setFeed] = useState<FeedEvent[]>([]);
+    const [toasts, setToasts] = useState<Toast[]>([]);
     const [flashes, setFlashes] = useState<Record<string, number>>({});
     const [now, setNow] = useState(() => Date.now());
     const [pageIdx, setPageIdx] = useState(0);
-    const [started, setStarted] = useState(false);
+    /** sound is playing (false while the browser holds it back until the first tap) */
+    const [audioOn, setAudioOn] = useState(false);
     const [muted, setMuted] = useState(false);
     const [idle, setIdle] = useState(false);
     const [full, setFull] = useState(false);
     const [shift, setShift] = useState({ x: 0, y: 0 });
-    const [width, setWidth] = useState(1280);
-    const [toast, setToast] = useState<FeedEvent | null>(null);
+    const [view, setView] = useState({ w: 1280, h: 720 });
     /** natural voice download: null = not needed, 0-100 = loading, "ready", "fallback" */
     const [voiceState, setVoiceState] = useState<number | "ready" | "fallback" | null>(null);
 
@@ -149,9 +157,14 @@ export default function WallScreen() {
 
     const announce = useCallback((events: FeedEvent[]) => {
         if (!events.length) return;
-        setFeed((f) => [...events.slice().reverse(), ...f].slice(0, FEED_MAX));
-        setToast(events[events.length - 1]);
         const d = displayRef.current;
+        if (d.showFeed) {
+            setToasts((t) => [...t, ...events.map((e) => ({ e }))].slice(-TOASTS_MAX));
+            const ids = new Set(events.map((e) => e.id));
+            const ms = d.notifySec * 1000;
+            setTimeout(() => setToasts((t) => t.map((x) => (ids.has(x.e.id) ? { ...x, leaving: true } : x))), ms);
+            setTimeout(() => setToasts((t) => t.filter((x) => !ids.has(x.e.id))), ms + 500);
+        }
         if (mutedRef.current || inQuietHours(d.quietHours)) return;
         if (d.sound.enabled && audioReady()) {
             const loud = events.filter((e) => wantsAnnounce(e, d.sound.on));
@@ -160,7 +173,8 @@ export default function WallScreen() {
                 playTone(d.sound.tone, level, d.sound.volume);
             }
         }
-        if (d.voice.enabled) {
+        // Not while the browser is still holding sound back: it would all play at once later
+        if (d.voice.enabled && audioReady()) {
             const said = events.filter((e) => wantsAnnounce(e, d.voice.on)).map((e) => e.speech);
             if (said.length) setTimeout(() => void announceVoice(said.slice(-3).join(" "), d.voice), d.sound.enabled ? 700 : 0);
         }
@@ -228,7 +242,7 @@ export default function WallScreen() {
         window.addEventListener("pointermove", wake);
         window.addEventListener("keydown", wake);
         window.addEventListener("touchstart", wake);
-        const size = () => setWidth(window.innerWidth);
+        const size = () => setView({ w: window.innerWidth, h: window.innerHeight });
         size();
         window.addEventListener("resize", size);
         const fsChange = () => setFull(!!document.fullscreenElement);
@@ -265,15 +279,17 @@ export default function WallScreen() {
         return () => clearInterval(t);
     }, [display.burnInShift]);
 
+    /* ── sound: on by itself (no question); the browser may hold it until the first tap ── */
+
+    const wantsSound = phase === "ready" && (display.sound.enabled || display.voice.enabled) && !muted;
     useEffect(() => {
-        if (!toast) return;
-        const t = setTimeout(() => setToast(null), Math.max(4, display.highlightSec) * 1000);
-        return () => clearTimeout(t);
-    }, [toast, display.highlightSec]);
+        if (!wantsSound) return;
+        return startAudioWhenAllowed(setAudioOn);
+    }, [wantsSound]);
 
-    /* ── natural voice: download it as soon as sound is allowed ── */
+    /* ── natural voice: download it straight away ── */
 
-    const wantsNatural = display.voice.enabled && display.voice.engine === "natural" && started && !muted;
+    const wantsNatural = phase === "ready" && display.voice.enabled && display.voice.engine === "natural" && !muted;
     const naturalId = display.voice.naturalVoice;
     useEffect(() => {
         // Unsupported browsers fall back to their own voice (announceVoice does that)
@@ -306,11 +322,6 @@ export default function WallScreen() {
         return () => window.removeEventListener("keydown", key);
     }, [pages.length]);
 
-    function start() {
-        unlockAudio();
-        setStarted(true);
-    }
-
     function toggleMute() {
         const m = !muted;
         setMuted(m);
@@ -342,108 +353,129 @@ export default function WallScreen() {
     if (phase === "pin") return shell(<PinForm title={title} error={pinError} onSubmit={(pin) => exchange(token, pin)} />);
     if (phase === "init" || !data || !page) return shell(<Message title="Loading wall…" spinner />);
 
-    const cols = width < 640 ? Math.min(2, display.columns) : width < 1024 ? Math.min(4, display.columns) : display.columns;
-    const showFeedPanel = display.showFeed && width >= 1280;
-    const needsStart = (display.sound.enabled || display.voice.enabled) && !started && !muted;
+    /* Layout: the canvas scaled to fit; on a phone where it would be too small to read,
+       tiles stack two to a row instead and the page scrolls. */
+    const canvas = display.canvas;
+    const stage = stageSize(canvas);
+    const groups = page.groups || [];
+    const { placed } = layoutTiles(page.tiles, canvas.cols, canvas.rows, groups);
+    const fitScale = Math.min(view.w / stage.w, view.h / stage.h);
+    const flow = view.w < 700 && fitScale < 0.55;
+    const flowed = flow ? flowLayout(placed, groups, canvas.cols) : null;
+    const laid = flowed || canvasRects(placed, groups, geometry(stage, canvas.cols, canvas.rows));
+    const k = flow ? FLOW.header / STAGE.header : 1;
+    const pad = flow ? FLOW.pad : STAGE.pad;
+    const stageW = flow ? FLOW.width : stage.w;
+    const stageH = flowed ? flowed.height : stage.h;
+    const sub = pages.length > 1 ? page.title || `Page ${pageIdx + 1} of ${pages.length}` : null;
+    const soundOn = display.sound.enabled || display.voice.enabled;
+    const blocked = soundOn && !muted && !audioOn;
 
     return (
-        <div className={cn("fixed inset-0 flex flex-col overflow-hidden", theme === "light" ? "wall-light" : "wall-dark", idle && "cursor-none")} style={themeStyle(display)}>
-            <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 sm:p-4" style={{ transform: display.burnInShift ? `translate(${shift.x}px, ${shift.y}px)` : undefined, transition: "transform 2s ease" }}>
-                {/* Header */}
-                <header className="flex shrink-0 items-center gap-3 px-1">
-                    <div className="min-w-0 flex-1">
-                        <h1 className="truncate text-lg font-semibold sm:text-xl">{data.wall.title}</h1>
-                        {pages.length > 1 && <div className="truncate text-xs" style={{ color: "var(--w-muted)" }}>{page.title || `Page ${pageIdx + 1}`}</div>}
+        <div className={cn("fixed inset-0", flow ? "overflow-y-auto overflow-x-hidden" : "overflow-hidden", theme === "light" ? "wall-light" : "wall-dark", idle && "cursor-none")} style={themeStyle(display)}>
+            <ScaledStage
+                w={stageW}
+                h={stageH}
+                fit={flow ? "width" : "contain"}
+                className={flow ? "w-full" : "h-full w-full"}
+                style={{ transform: display.burnInShift ? `translate(${shift.x}px, ${shift.y}px)` : undefined, transition: "transform 2s ease" }}
+            >
+                {() => (
+                    <>
+                        <StageHeader
+                            title={data.wall.title}
+                            sub={sub}
+                            now={now}
+                            showClock={display.showClock}
+                            k={k}
+                            pad={pad}
+                            height={flow ? FLOW.header : STAGE.header}
+                            right={
+                                <div className="flex shrink-0 items-center" style={{ gap: 18 * k, fontSize: 16 * k, color: "var(--w-muted)" }}>
+                                    {typeof voiceState === "number" && (
+                                        <span className="flex items-center font-medium" style={{ gap: 6 * k }} role="status">
+                                            <Loader2 className="animate-spin" style={{ width: 18 * k, height: 18 * k }} /> Preparing voice {voiceState}%
+                                        </span>
+                                    )}
+                                    {blocked && (
+                                        <span className="flex items-center font-medium" style={{ gap: 6 * k, color: "var(--w-warn)" }} title="This browser plays sound only after the screen is touched once">
+                                            <VolumeX style={{ width: 18 * k, height: 18 * k }} /> Tap anywhere for sound
+                                        </span>
+                                    )}
+                                    {muted && soundOn && (
+                                        <span className="flex items-center font-medium" style={{ gap: 6 * k }}>
+                                            <VolumeX style={{ width: 18 * k, height: 18 * k }} /> Muted
+                                        </span>
+                                    )}
+                                    <ConnDot conn={conn} k={k} />
+                                </div>
+                            }
+                        />
+                        <StageTiles
+                            data={data}
+                            items={laid.items}
+                            frames={laid.frames}
+                            groupScale={flow ? 0.7 : 1}
+                            now={now}
+                            textScale={display.textScale}
+                            flashes={flashes}
+                            highlightMs={display.highlightSec * 1000}
+                        />
+                        {!page.tiles.length && (
+                            <div className="absolute inset-x-0 grid place-items-center" style={{ top: STAGE.header, bottom: 0, fontSize: 24, color: "var(--w-faint)" }}>Nothing on this page yet</div>
+                        )}
+                        {!flow && <StageToasts items={toasts} now={now} stageW={stageW} />}
+                    </>
+                )}
+            </ScaledStage>
+
+            {/* On phones the notifications stay on screen while the page scrolls */}
+            {flow && toasts.length > 0 && (
+                <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 h-0">
+                    <div className="relative mx-auto h-0" style={{ width: Math.min(view.w, 440) }}>
+                        <StageToasts items={toasts.slice(-2)} now={now} stageW={Math.min(view.w, 440)} k={0.62} pad={12} />
                     </div>
-                    {pages.length > 1 && (
-                        <div className="flex items-center gap-1.5" aria-label="Pages">
-                            <IconBtn label="Previous page" onClick={() => setPageIdx((i) => (i - 1 + pages.length) % pages.length)} hidden={idle}><ChevronLeft className="h-4 w-4" /></IconBtn>
-                            {pages.map((p, i) => (
-                                <button key={p.id} type="button" aria-label={`Page ${i + 1}`} aria-current={i === pageIdx} onClick={() => setPageIdx(i)} className="h-2 rounded-full transition-all" style={{ width: i === pageIdx ? 20 : 8, background: i === pageIdx ? "var(--w-text)" : "var(--w-border)" }} />
-                            ))}
-                            <IconBtn label="Next page" onClick={() => setPageIdx((i) => (i + 1) % pages.length)} hidden={idle}><ChevronRight className="h-4 w-4" /></IconBtn>
-                        </div>
-                    )}
-                    {display.showClock && (
-                        <div className="hidden text-right tabular-nums sm:block">
-                            <div className="text-lg font-semibold leading-none">{new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
-                            <div className="text-xs" style={{ color: "var(--w-muted)" }}>{new Date(now).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}</div>
-                        </div>
-                    )}
-                    {typeof voiceState === "number" && (
-                        <span className="hidden items-center gap-1.5 text-xs font-medium sm:flex" style={{ color: "var(--w-muted)" }} role="status">
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Preparing voice {voiceState}%
-                        </span>
-                    )}
-                    <ConnDot conn={conn} />
-                    {(display.sound.enabled || display.voice.enabled) && (
-                        <IconBtn label={muted ? "Turn sound on" : "Mute"} onClick={toggleMute} hidden={idle && !muted}>
-                            {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-                        </IconBtn>
-                    )}
-                    <IconBtn label={full ? "Exit full screen" : "Full screen"} onClick={toggleFull} hidden={idle}>
-                        {full ? <Minimize className="h-4 w-4" /> : <Expand className="h-4 w-4" />}
-                    </IconBtn>
-                </header>
-
-                {/* Body */}
-                <div className="flex min-h-0 flex-1 gap-3">
-                    <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-                        <WallGrid data={data} page={page} columns={cols} now={now} flashes={flashes} highlightMs={display.highlightSec * 1000} fill={width >= 640} textScale={display.textScale} />
-                    </main>
-                    {showFeedPanel && (
-                        <aside className="flex w-80 shrink-0 flex-col gap-2 overflow-hidden" aria-label="Recent events">
-                            <div className="px-1 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--w-muted)" }}>Recent events</div>
-                            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
-                                <FeedList events={feed} now={now} />
-                            </div>
-                        </aside>
-                    )}
-                </div>
-            </div>
-
-            {/* Latest event (when the side panel isn't shown) */}
-            {!showFeedPanel && toast && (
-                <div className="pointer-events-none fixed inset-x-3 bottom-3 z-20 mx-auto max-w-md" role="status">
-                    <FeedList events={[toast]} now={now} />
                 </div>
             )}
+
+            {/* Controls: show when the mouse moves or the screen is touched */}
+            <div className={cn("fixed bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-2xl border p-1.5 shadow-xl transition-opacity duration-500", idle ? "pointer-events-none opacity-0" : "opacity-100")} style={{ background: "var(--w-card)", borderColor: "var(--w-border)" }}>
+                {pages.length > 1 && (
+                    <>
+                        <IconBtn label="Previous page" onClick={() => setPageIdx((i) => (i - 1 + pages.length) % pages.length)}><ChevronLeft className="h-4 w-4" /></IconBtn>
+                        {pages.map((p, i) => (
+                            <button key={p.id} type="button" aria-label={`Page ${i + 1}`} aria-current={i === pageIdx} onClick={() => setPageIdx(i)} className="h-2 rounded-full transition-all" style={{ width: i === pageIdx ? 20 : 8, background: i === pageIdx ? "var(--w-text)" : "var(--w-border)" }} />
+                        ))}
+                        <IconBtn label="Next page" onClick={() => setPageIdx((i) => (i + 1) % pages.length)}><ChevronRight className="h-4 w-4" /></IconBtn>
+                    </>
+                )}
+                {soundOn && (
+                    <IconBtn label={muted ? "Turn sound on" : "Mute"} onClick={toggleMute}>
+                        {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                    </IconBtn>
+                )}
+                <IconBtn label={full ? "Exit full screen" : "Full screen"} onClick={toggleFull}>
+                    {full ? <Minimize className="h-4 w-4" /> : <Expand className="h-4 w-4" />}
+                </IconBtn>
+            </div>
 
             {conn === "reconnecting" && (
                 <div className="fixed left-1/2 top-3 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg" style={{ background: "var(--w-card)", borderColor: "var(--w-warn)", color: "var(--w-warn)" }} role="status">
                     <WifiOff className="h-3.5 w-3.5" /> Connection lost, values may be out of date. Reconnecting…
                 </div>
             )}
-
-            {needsStart && (
-                <div className="fixed inset-0 z-40 grid place-items-center p-6" style={{ background: "var(--w-overlay)" }}>
-                    <div className="w-full max-w-sm rounded-3xl border p-6 text-center shadow-2xl" style={{ background: "var(--w-card)", borderColor: "var(--w-border)" }}>
-                        <Volume2 className="mx-auto h-8 w-8" />
-                        <h2 className="mt-3 text-lg font-semibold">This wall plays sounds</h2>
-                        <p className="mt-1 text-sm" style={{ color: "var(--w-muted)" }}>Browsers only allow sound after you tap the page once.</p>
-                        <div className="mt-5 flex flex-col gap-2">
-                            <button type="button" onClick={start} className="h-11 rounded-xl font-semibold" style={{ background: "var(--w-text)", color: "var(--w-bg)" }} autoFocus>
-                                Start with sound
-                            </button>
-                            <button type="button" onClick={() => { setStarted(true); toggleMute(); }} className="h-11 rounded-xl border font-semibold" style={{ borderColor: "var(--w-border)" }}>
-                                Start muted
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }
 
-function IconBtn({ label, onClick, children, hidden }: { label: string; onClick: () => void; children: React.ReactNode; hidden?: boolean }) {
+function IconBtn({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
     return (
         <button
             type="button"
             aria-label={label}
             title={label}
             onClick={onClick}
-            className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl border transition-opacity duration-500", hidden && "opacity-0 focus-visible:opacity-100")}
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border"
             style={{ borderColor: "var(--w-border)", background: "var(--w-card)", color: "var(--w-text)" }}
         >
             {children}
@@ -451,16 +483,16 @@ function IconBtn({ label, onClick, children, hidden }: { label: string; onClick:
     );
 }
 
-function ConnDot({ conn }: { conn: StreamStatus }) {
+function ConnDot({ conn, k = 1 }: { conn: StreamStatus; k?: number }) {
     const label = conn === "live" ? "Live" : conn === "polling" ? "Updating every 5 s" : conn === "connecting" ? "Connecting" : "Reconnecting";
     const color = conn === "live" ? "var(--w-on)" : conn === "polling" ? "var(--w-accent)" : "var(--w-warn)";
     return (
-        <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: "var(--w-muted)" }} title={label}>
-            <span className="relative flex h-2 w-2">
+        <span className="flex items-center font-medium" style={{ gap: 8 * k, color: "var(--w-muted)" }} title={label}>
+            <span className="relative flex" style={{ width: 12 * k, height: 12 * k }}>
                 {conn === "live" && <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-50 motion-reduce:hidden" style={{ background: color }} />}
-                <span className="relative inline-flex h-2 w-2 rounded-full" style={{ background: color }} />
+                <span className="relative inline-flex h-full w-full rounded-full" style={{ background: color }} />
             </span>
-            <span className="hidden md:inline">{label}</span>
+            {label}
         </span>
     );
 }
