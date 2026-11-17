@@ -9,7 +9,7 @@ import { DEFAULT_NATURAL_VOICE, naturalVoiceSupported, setVoiceAudioContext, spe
 
 /* ─────────────────────────────── Types ─────────────────────────────── */
 
-export type TileType = "sensor" | "actuator" | "status" | "clock" | "text";
+export type TileType = "sensor" | "actuator" | "status" | "clock" | "text" | "graph" | "image";
 export type TileSize = "s" | "m" | "l" | "t";
 export type SensorStyle = "number" | "gauge" | "chart";
 export type Level = "ok" | "warn" | "critical";
@@ -17,6 +17,40 @@ export type Level = "ok" | "warn" | "critical";
 export interface Range {
     below?: number | null;
     above?: number | null;
+}
+
+export type IconSize = "sm" | "md" | "lg";
+export type GraphKind = "line" | "area" | "bar";
+export const GRAPH_RANGES: { h: number; label: string }[] = [
+    { h: 1, label: "1 hour" },
+    { h: 6, label: "6 hours" },
+    { h: 24, label: "24 hours" },
+    { h: 72, label: "3 days" },
+    { h: 168, label: "7 days" },
+];
+
+/** One line of a graph tile. Owner side has deviceId + key; the screen gets id + dev. */
+export interface GraphSeries {
+    deviceId?: string;
+    key?: string;
+    label?: string | null;
+    unit?: string | null;
+    color?: string | null;
+    /** screen side: history id ("<tile>.<n>") and device alias */
+    id?: string;
+    dev?: string;
+}
+
+/** A named frame on a page; the tiles inside its area belong to it. */
+export interface WallGroup {
+    id: string;
+    label?: string | null;
+    icon?: string | null;
+    color?: string | null;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
 }
 
 export interface WallTile {
@@ -29,7 +63,17 @@ export interface WallTile {
     unit?: string | null;
     icon?: string | null;
     color?: string | null;
+    /** tile background colour (hex); text switches to dark or light to stay readable */
+    bg?: string | null;
+    /** sm: small icon by the label; md / lg: a big icon next to the value */
+    iconSize?: IconSize;
+    /** legacy size: only used to place a tile that has no position yet */
     size: TileSize;
+    /** position on the canvas grid, in cells */
+    x?: number;
+    y?: number;
+    w?: number;
+    h?: number;
     style?: SensorStyle;
     decimals?: number | null;
     min?: number | null;
@@ -38,6 +82,13 @@ export interface WallTile {
     critical?: Range | null;
     announce?: boolean;
     text?: string | null;
+    /** graph */
+    series?: GraphSeries[];
+    rangeH?: number;
+    chart?: GraphKind;
+    /** image: "file:<id>" */
+    image?: string | null;
+    fit?: "cover" | "contain";
     dev?: string;
     unavailable?: boolean;
 }
@@ -46,12 +97,25 @@ export interface WallPage {
     id: string;
     title?: string | null;
     tiles: WallTile[];
+    groups?: WallGroup[];
+}
+
+/** The screen a wall is designed for, split into cols × rows cells that tiles snap to. */
+export interface WallCanvas {
+    width: number;
+    height: number;
+    cols: number;
+    rows: number;
 }
 
 export interface WallDisplay {
     theme: "auto" | "light" | "dark";
     accent: string | null;
+    /** old setting, replaced by canvas */
     columns: number;
+    canvas: WallCanvas;
+    /** how long a pop-up notification stays */
+    notifySec: number;
     textScale: number;
     rotateSec: number;
     showClock: boolean;
@@ -123,14 +187,16 @@ export const DEFAULT_DISPLAY: WallDisplay = {
     theme: "dark",
     accent: null,
     columns: 4,
+    canvas: { width: 1920, height: 1080, cols: 12, rows: 6 },
+    notifySec: 8,
     textScale: 1,
     rotateSec: 0,
     showClock: true,
     showFeed: true,
     highlightSec: 6,
     burnInShift: true,
-    sound: { enabled: false, on: "all", tone: "chime", volume: 0.6 },
-    voice: { enabled: false, on: "all", engine: "natural", naturalVoice: DEFAULT_NATURAL_VOICE, volume: 1, rate: 1, pitch: 1, lang: null, voiceName: null },
+    sound: { enabled: true, on: "all", tone: "chime", volume: 0.6 },
+    voice: { enabled: true, on: "all", engine: "natural", naturalVoice: DEFAULT_NATURAL_VOICE, volume: 1, rate: 1, pitch: 1, lang: null, voiceName: null },
     quietHours: { enabled: false, from: "22:00", to: "06:00" },
 };
 
@@ -139,14 +205,255 @@ export function normaliseDisplay(d: any): WallDisplay {
     return {
         ...DEFAULT_DISPLAY,
         ...x,
+        canvas: { ...DEFAULT_DISPLAY.canvas, ...(x.canvas || {}) },
         sound: { ...DEFAULT_DISPLAY.sound, ...(x.sound || {}) },
         voice: { ...DEFAULT_DISPLAY.voice, ...(x.voice || {}) },
         quietHours: { ...DEFAULT_DISPLAY.quietHours, ...(x.quietHours || {}) },
     };
 }
 
-export const SIZE_LABELS: Record<TileSize, string> = { s: "Small", m: "Wide", l: "Large", t: "Tall" };
-export const SIZE_SPAN: Record<TileSize, { c: number; r: number }> = { s: { c: 1, r: 1 }, m: { c: 2, r: 1 }, l: { c: 2, r: 2 }, t: { c: 1, r: 2 } };
+/* ─────────────────────────────── Layout ─────────────────────────────── */
+
+export const RESOLUTIONS: { id: string; label: string; width: number; height: number }[] = [
+    { id: "1920x1080", label: "Full HD TV · 1920 × 1080", width: 1920, height: 1080 },
+    { id: "3840x2160", label: "4K TV · 3840 × 2160", width: 3840, height: 2160 },
+    { id: "1280x720", label: "HD TV · 1280 × 720", width: 1280, height: 720 },
+    { id: "1366x768", label: "Laptop · 1366 × 768", width: 1366, height: 768 },
+    { id: "2560x1440", label: "Monitor QHD · 2560 × 1440", width: 2560, height: 1440 },
+    { id: "1920x1200", label: "Monitor 16:10 · 1920 × 1200", width: 1920, height: 1200 },
+    { id: "3440x1440", label: "Ultrawide · 3440 × 1440", width: 3440, height: 1440 },
+    { id: "1024x768", label: "Tablet 4:3 · 1024 × 768", width: 1024, height: 768 },
+    { id: "1080x1920", label: "Portrait TV · 1080 × 1920", width: 1080, height: 1920 },
+];
+
+/**
+ * Everything is drawn on a "stage" whose shorter side is always 1080 units, with the
+ * canvas' shape; the screen then scales the stage to fit. So a 4K TV and a 720p TV show
+ * the same layout at the same proportions, and text sizes are tuned once.
+ */
+export const STAGE_BASE = 1080;
+export const STAGE = { pad: 28, gap: 16, header: 84 };
+
+export function stageSize(c: WallCanvas): { w: number; h: number } {
+    const k = STAGE_BASE / Math.max(1, Math.min(c.width, c.height));
+    return { w: Math.round(c.width * k), h: Math.round(c.height * k) };
+}
+
+/** Rows that keep cells about square for these columns. */
+export function autoRows(c: Pick<WallCanvas, "width" | "height" | "cols">): number {
+    const s = stageSize({ ...c, rows: 1 });
+    const cw = (s.w - STAGE.pad * 2) / c.cols;
+    return Math.max(2, Math.min(24, Math.round((s.h - STAGE.pad * 2 - STAGE.header) / cw)));
+}
+
+export interface Geometry {
+    left: number;
+    top: number;
+    cw: number;
+    ch: number;
+    gap: number;
+}
+
+export function geometry(stage: { w: number; h: number }, cols: number, rows: number, pad = STAGE.pad, header = STAGE.header, gap = STAGE.gap): Geometry {
+    const top = pad + header;
+    return { left: pad, top, gap, cw: (stage.w - pad * 2 - gap * (cols - 1)) / cols, ch: (stage.h - top - pad - gap * (rows - 1)) / rows };
+}
+
+export interface Cell {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+}
+
+export function cellRect(g: Geometry, c: Cell) {
+    return { left: g.left + c.x * (g.cw + g.gap), top: g.top + c.y * (g.ch + g.gap), width: c.w * g.cw + (c.w - 1) * g.gap, height: c.h * g.ch + (c.h - 1) * g.gap };
+}
+
+export type Placed = WallTile & Cell;
+
+const SIZE_CELLS: Record<TileSize, [number, number]> = { s: [1, 1], m: [2, 1], l: [2, 2], t: [1, 2] };
+
+/** Size for a tile that has none yet: its old size, in about sixths of the canvas. */
+export function defaultSpan(t: Pick<WallTile, "size" | "type" | "style">, cols: number, rows: number): { w: number; h: number } {
+    const [a, b] = SIZE_CELLS[t.size] || SIZE_CELLS.s;
+    const u = Math.max(1, Math.round(cols / 6));
+    const v = Math.max(1, Math.round(rows / 3));
+    return { w: Math.min(cols, a * u), h: Math.min(rows, b * v) };
+}
+
+export function overlaps(a: Cell, b: Cell): boolean {
+    return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+export function contains(outer: Cell, inner: Cell): boolean {
+    return inner.x >= outer.x && inner.y >= outer.y && inner.x + inner.w <= outer.x + outer.w && inner.y + inner.h <= outer.y + outer.h;
+}
+
+/** A tile may sit fully inside a group or fully outside it, never across its edge. */
+export function crossesGroup(c: Cell, groups: Cell[] = []): boolean {
+    return groups.some((g) => overlaps(g, c) && !contains(g, c));
+}
+
+/** The group a tile sits in, if any. */
+export function groupOf<G extends Cell>(c: Cell, groups: G[] = []): G | undefined {
+    return groups.find((g) => contains(g, c));
+}
+
+/** First free spot for a w × h tile, left to right, top to bottom. */
+export function findSpot(taken: Cell[], w: number, h: number, cols: number, rows: number, groups: Cell[] = []): Cell | null {
+    for (let y = 0; y + h <= rows; y++) {
+        for (let x = 0; x + w <= cols; x++) {
+            const c = { x, y, w, h };
+            if (!taken.some((t) => overlaps(t, c)) && !crossesGroup(c, groups)) return c;
+        }
+    }
+    return null;
+}
+
+/**
+ * Where every tile goes. Tiles keep their own position when it is inside the canvas and
+ * free; the rest (old walls, a smaller grid) go to the first free spot, shrinking if they
+ * must. Tiles that can't fit at all are returned as `overflow`. Same result on every screen.
+ */
+export function layoutTiles(tiles: WallTile[], cols: number, rows: number, groups: Cell[] = []): { placed: Placed[]; overflow: WallTile[] } {
+    const taken: Cell[] = [];
+    const pos = new Map<string, Cell>();
+    const ok = (n: unknown) => Number.isInteger(n);
+    for (const t of tiles) {
+        if (!ok(t.x) || !ok(t.y) || !ok(t.w) || !ok(t.h)) continue;
+        const c = { x: t.x!, y: t.y!, w: t.w!, h: t.h! };
+        if (c.w < 1 || c.h < 1 || c.x < 0 || c.y < 0 || c.x + c.w > cols || c.y + c.h > rows) continue;
+        if (taken.some((x) => overlaps(x, c))) continue;
+        taken.push(c);
+        pos.set(t.id, c);
+    }
+    const overflow: WallTile[] = [];
+    for (const t of tiles) {
+        if (pos.has(t.id)) continue;
+        const want = ok(t.w) && ok(t.h) ? { w: Math.min(cols, Math.max(1, t.w!)), h: Math.min(rows, Math.max(1, t.h!)) } : defaultSpan(t, cols, rows);
+        let c: Cell | null = null;
+        for (let w = want.w, h = want.h; !c && w >= 1 && h >= 1; w > h ? w-- : h--) c = findSpot(taken, w, h, cols, rows, groups);
+        if (!c) {
+            overflow.push(t);
+            continue;
+        }
+        taken.push(c);
+        pos.set(t.id, c);
+    }
+    return { placed: tiles.filter((t) => pos.has(t.id)).map((t) => ({ ...t, ...pos.get(t.id)! })), overflow };
+}
+
+/** Write resolved positions into the tiles (so the saved wall matches what's shown). */
+export function withPositions(tiles: WallTile[], cols: number, rows: number, groups: Cell[] = []): WallTile[] {
+    const { placed } = layoutTiles(tiles, cols, rows, groups);
+    const at = new Map(placed.map((p) => [p.id, p]));
+    return tiles.map((t) => {
+        const p = at.get(t.id);
+        return p ? { ...t, x: p.x, y: p.y, w: p.w, h: p.h } : t;
+    });
+}
+
+/**
+ * Move tiles to a new grid size, then fix any overlaps. "stretch" scales across and down
+ * separately (more or fewer rows on the same screen); "keep" scales both the same way so
+ * tiles keep their shape (a different screen, e.g. landscape to portrait).
+ */
+export function regrid(page: WallPage, from: Pick<WallCanvas, "cols" | "rows">, to: Pick<WallCanvas, "cols" | "rows">, mode: "stretch" | "keep" = "stretch"): WallPage {
+    let fx = to.cols / from.cols;
+    let fy = to.rows / from.rows;
+    if (mode === "keep") fx = fy = Math.min(fx, fy);
+    const scale = <T extends Partial<Cell>>(t: T): T => {
+        if (!Number.isInteger(t.x)) return t;
+        const x = Math.min(Math.round(t.x! * fx), to.cols - 1);
+        const y = Math.min(Math.round(t.y! * fy), to.rows - 1);
+        const w = Math.max(1, Math.min(to.cols - x, Math.round((t.x! + t.w!) * fx) - x));
+        const h = Math.max(1, Math.min(to.rows - y, Math.round((t.y! + t.h!) * fy) - y));
+        return { ...t, x, y, w, h };
+    };
+    const groups = (page.groups || []).map(scale);
+    return { ...page, groups, tiles: withPositions(page.tiles.map(scale), to.cols, to.rows, groups) };
+}
+
+/* ─────────────────────────────── Rectangles ─────────────────────────────── */
+
+export interface Rect {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+}
+
+/** Group frame: a header strip, then its tiles a little inset. */
+export const GROUP = { head: 60, pad: 14 };
+
+/**
+ * Where tiles and group frames are drawn (stage units). Tiles inside a group are fitted
+ * into the frame below its header, keeping their arrangement.
+ */
+export function canvasRects(placed: Placed[], groups: WallGroup[], g: Geometry, k = 1): { items: { t: Placed; r: Rect }[]; frames: { g: WallGroup; r: Rect }[] } {
+    const frames = groups.map((x) => ({ g: x, r: cellRect(g, x) }));
+    const items = placed.map((t) => {
+        const r = cellRect(g, t);
+        const f = frames.find((x) => contains(x.g, t));
+        if (!f) return { t, r };
+        const head = GROUP.head * k;
+        const pad = GROUP.pad * k;
+        const sx = (f.r.width - pad * 2) / f.r.width;
+        const sy = (f.r.height - head - pad) / f.r.height;
+        return { t, r: { left: f.r.left + pad + (r.left - f.r.left) * sx, top: f.r.top + head + (r.top - f.r.top) * sy, width: r.width * sx, height: r.height * sy } };
+    });
+    return { items, frames };
+}
+
+/**
+ * Phone layout: when the canvas would be too small to read, tiles are stacked two to a
+ * row in reading order instead (wide tiles take the full row).
+ */
+export const FLOW = { width: 440, cols: 2, row: 150, pad: 14, gap: 12, header: 64 };
+
+export function flowLayout(placed: Placed[], groups: WallGroup[], cols: number): { items: { t: Placed; r: Rect }[]; frames: { g: WallGroup; r: Rect }[]; height: number } {
+    const cw = (FLOW.width - FLOW.pad * 2 - FLOW.gap) / FLOW.cols;
+    const items: { t: Placed; r: Rect }[] = [];
+    const frames: { g: WallGroup; r: Rect }[] = [];
+    const byPos = (a: Cell, b: Cell) => a.y - b.y || a.x - b.x;
+    // Sections in reading order: each group with its tiles, and runs of loose tiles
+    const entries: { at: Cell; group?: WallGroup; tile?: Placed }[] = [
+        ...groups.map((g) => ({ at: g, group: g })),
+        ...placed.filter((t) => !groupOf(t, groups)).map((t) => ({ at: t as Cell, tile: t })),
+    ].sort((a, b) => byPos(a.at, b.at));
+    const sections: { group?: WallGroup; tiles: Placed[] }[] = [];
+    for (const e of entries) {
+        if (e.group) sections.push({ group: e.group, tiles: placed.filter((t) => contains(e.group!, t)).sort(byPos) });
+        else if (sections.length && !sections[sections.length - 1].group) sections[sections.length - 1].tiles.push(e.tile!);
+        else sections.push({ tiles: [e.tile!] });
+    }
+    let y = FLOW.pad + FLOW.header;
+    for (const sec of sections) {
+        const k = 0.7;
+        const head = sec.group ? GROUP.head * k : 0;
+        const pad = sec.group ? GROUP.pad * k : 0;
+        const inner = FLOW.width - FLOW.pad * 2 - pad * 2;
+        const icw = sec.group ? (inner - FLOW.gap) / 2 : cw;
+        const taken: Cell[] = [];
+        for (const t of sec.tiles) {
+            // A third of the canvas or wider takes the full row; tall or big tiles get two rows
+            const w = t.w * 3 >= cols ? 2 : 1;
+            const h = t.h / t.w >= (w === 2 ? 0.75 : 1.5) ? 2 : 1;
+            const c = findSpot(taken, w, h, FLOW.cols, 999)!;
+            taken.push(c);
+            items.push({
+                t,
+                r: { left: FLOW.pad + pad + c.x * (icw + FLOW.gap), top: y + head + c.y * (FLOW.row + FLOW.gap), width: c.w * icw + (c.w - 1) * FLOW.gap, height: c.h * FLOW.row + (c.h - 1) * FLOW.gap },
+            });
+        }
+        const rowsUsed = taken.length ? Math.max(...taken.map((c) => c.y + c.h)) : 0;
+        const body = rowsUsed ? rowsUsed * (FLOW.row + FLOW.gap) - FLOW.gap : 0;
+        if (sec.group) frames.push({ g: sec.group, r: { left: FLOW.pad, top: y, width: FLOW.width - FLOW.pad * 2, height: head + body + pad } });
+        y += head + body + pad + FLOW.gap;
+    }
+    return { items, frames, height: y - FLOW.gap + FLOW.pad };
+}
 
 export function newId(prefix = "t"): string {
     const a = new Uint8Array(6);
@@ -164,6 +471,9 @@ export function tileLabel(t: WallTile): string {
     if (t.label) return t.label;
     if (t.type === "clock") return "Clock";
     if (t.type === "text") return "Note";
+    if (t.type === "status") return "Device status";
+    if (t.type === "graph") return t.series?.length === 1 && t.series[0].label ? t.series[0].label : "Graph";
+    if (t.type === "image") return "Picture";
     return t.key ? humanizeKey(t.key.split(".").pop() || t.key) : "Tile";
 }
 
@@ -290,12 +600,34 @@ export function changedTiles(prev: WallData, next: WallData): string[] {
     return ids;
 }
 
+/** How long a history line covers, and how close points may be (graphs keep ~120 points). */
+function historySpan(wall: WallConfig, id: string): { keepMs: number; stepMs: number } {
+    const dot = id.indexOf(".");
+    if (dot > 0) {
+        const tileId = id.slice(0, dot);
+        for (const p of wall.pages) {
+            const t = p.tiles.find((x) => x.id === tileId);
+            if (t?.type === "graph") {
+                const keepMs = (t.rangeH || 24) * 3600 * 1000;
+                return { keepMs, stepMs: keepMs <= 3600 * 1000 ? 0 : keepMs / 120 };
+            }
+        }
+    }
+    return { keepMs: 3600 * 1000, stepMs: 0 };
+}
+
 /** Apply a stream update to the current state (immutably). */
-export function applyUpdate(cur: WallData, u: WallUpdate, keepMs = 60 * 60 * 1000): WallData {
+export function applyUpdate(cur: WallData, u: WallUpdate): WallData {
     const history = { ...cur.history };
-    const cutoff = Date.now() - keepMs;
+    const now = Date.now();
     for (const [id, p] of Object.entries(u.points || {})) {
-        history[id] = [...(history[id] || []).filter(([t]) => t >= cutoff), p].slice(-240);
+        const { keepMs, stepMs } = historySpan(cur.wall, id);
+        const line = (history[id] || []).filter(([t]) => t >= now - keepMs);
+        const last = line[line.length - 1];
+        // Long graphs: a new reading updates the newest point until a step has passed
+        if (stepMs && last && p[0] - last[0] < stepMs && line.length > 1) line[line.length - 1] = [last[0], (last[1] + p[1]) / 2];
+        else line.push(p);
+        history[id] = line.slice(-240);
     }
     return {
         ...cur,
@@ -327,7 +659,11 @@ export function wantsAnnounce(e: FeedEvent, on: "all" | "alerts"): boolean {
 
 let audioCtx: AudioContext | null = null;
 
-/** Must be called from a click/tap once: browsers block sound until the page is touched. */
+/**
+ * Create / resume the audio output. Works straight away where the browser allows sound
+ * (kiosk settings, a site the screen has played sound on before); otherwise it starts on
+ * the first tap or key press (see startAudioWhenAllowed).
+ */
 export function unlockAudio(): boolean {
     try {
         const Ctx = window.AudioContext || (window as any).webkitAudioContext;
@@ -343,6 +679,32 @@ export function unlockAudio(): boolean {
 
 export function audioReady(): boolean {
     return !!audioCtx && audioCtx.state === "running";
+}
+
+/**
+ * Start sound without asking: try now, and if the browser holds it back, start it on the
+ * first tap, click or key press anywhere (a TV remote counts). `onChange(true)` once it plays.
+ */
+export function startAudioWhenAllowed(onChange: (running: boolean) => void): () => void {
+    if (typeof window === "undefined") return () => {};
+    unlockAudio();
+    const ctx = audioCtx;
+    const report = () => onChange(audioReady());
+    const events = ["pointerdown", "keydown", "touchend", "click"];
+    const kick = () => {
+        unlockAudio();
+        setTimeout(report, 150);
+    };
+    for (const e of events) window.addEventListener(e, kick, { capture: true, passive: true });
+    ctx?.addEventListener?.("statechange", report);
+    // resume() never settles while the browser is blocking, so check after a moment
+    const t = setTimeout(report, 400);
+    report();
+    return () => {
+        clearTimeout(t);
+        for (const e of events) window.removeEventListener(e, kick, { capture: true } as any);
+        ctx?.removeEventListener?.("statechange", report);
+    };
 }
 
 export function playTone(tone: WallDisplay["sound"]["tone"], level: FeedEvent["level"], volume: number) {

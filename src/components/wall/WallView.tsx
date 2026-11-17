@@ -4,21 +4,25 @@
  * Wall display renderer, shared by the public screen (/w) and the editor preview (/wall).
  * Colours come from the .wall-dark / .wall-light variables (globals.css), not the app theme.
  *
- * Sizes are worked out in JavaScript from each tile's measured width and height (not CSS
- * container units, which old TV, tablet and kiosk browsers get wrong), and big text is
- * fitted to the space it has, so nothing spills out on any screen.
+ * The wall is laid out on a fixed-size stage (shorter side 1080 units, the canvas' shape;
+ * see stageSize in lib/wall) that is scaled to fit the screen, so it looks the same on
+ * every screen. Big text is fitted to each tile's size, so nothing spills out.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlertTriangle, Bell, CheckCircle2, Clock3, Power, StickyNote, Wifi } from "lucide-react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { AlertTriangle, Bell, CheckCircle2, Clock3, ImageIcon, LineChart, Power, StickyNote, Wifi } from "lucide-react";
 import { IconRef } from "@/lib/icons";
+import { fileUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
     FeedEvent,
-    SIZE_SPAN,
+    GROUP,
+    Placed,
+    Rect,
+    STAGE,
     TileValue,
     WallData,
     WallDisplay,
-    WallPage,
+    WallGroup,
     WallTile,
     formatNumber,
     formatValue,
@@ -79,39 +83,63 @@ function alpha(color: string | null | undefined, a: string, fallback: string) {
     return color && /^#[0-9a-f]{6}$/i.test(color) ? color + a : fallback;
 }
 
-/* ─────────────────────────────── Grid ─────────────────────────────── */
+/** Is this hex colour light (so text on it should be dark)? */
+export function isLight(hex: string): boolean {
+    const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+    if (!m) return false;
+    const [r, g, b] = [m[1], m[2], m[3]].map((x) => {
+        const c = parseInt(x, 16) / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.4;
+}
 
-interface GridProps {
-    data: WallData;
-    page: WallPage;
-    columns: number;
-    now: number;
-    /** tileId -> time of its last change (restarts the highlight) */
-    flashes?: Record<string, number>;
-    highlightMs?: number;
-    /** fill the available height (the screen); otherwise fixed rows (editor) */
-    fill?: boolean;
-    rowHeight?: number;
-    textScale?: number;
-    editor?: {
-        selected?: string | null;
-        onSelect: (id: string) => void;
-        actions?: (t: WallTile) => React.ReactNode;
+/** Text colours that read well on a custom tile background. */
+function onColour(bg: string): React.CSSProperties {
+    const light = isLight(bg);
+    const ink = light ? "0,0,0" : "255,255,255";
+    return {
+        ["--w-text" as any]: light ? "#111113" : "#ffffff",
+        ["--w-muted" as any]: `rgba(${ink},.68)`,
+        ["--w-faint" as any]: `rgba(${ink},.5)`,
+        ["--w-border" as any]: `rgba(${ink},.18)`,
+        ["--w-card-2" as any]: `rgba(${ink},.1)`,
+        color: light ? "#111113" : "#ffffff",
     };
 }
 
-const GAP = 12;
+const SERIES_COLORS = ["#22c55e", "#3b82f6", "#f97316", "#a855f7"];
 
-export function WallGrid({ data, page, columns, now, flashes = {}, highlightMs = 6000, fill, rowHeight = 150, textScale = 1, editor }: GridProps) {
+/* ─────────────────────────────── Stage ─────────────────────────────── */
+
+/**
+ * Scales a fixed-size stage (w × h units) to its container: "contain" fits it whole and
+ * centres it (the screen), "width" fills the width and sets its own height (editor, phones).
+ */
+export function ScaledStage({
+    w,
+    h,
+    fit = "contain",
+    maxVh,
+    className,
+    style,
+    children,
+}: {
+    w: number;
+    h: number;
+    fit?: "contain" | "width";
+    /** "width" only: never taller than this share of the window (tall portrait canvases) */
+    maxVh?: number;
+    className?: string;
+    style?: React.CSSProperties;
+    children: (scale: number) => React.ReactNode;
+}) {
     const ref = useRef<HTMLDivElement>(null);
-    const [box, setBox] = useState({ w: 0, h: 0 });
-    const cells = page.tiles.reduce((n, t) => n + Math.min(SIZE_SPAN[t.size].c, columns) * SIZE_SPAN[t.size].r, 0);
-    const rows = Math.max(1, Math.ceil(cells / columns));
-
+    const [box, setBox] = useState({ w: 0, h: 0, vh: 0 });
     useLayoutEffect(() => {
         const el = ref.current;
         if (!el) return;
-        const measure = () => setBox({ w: el.clientWidth, h: el.parentElement?.clientHeight || 0 });
+        const measure = () => setBox({ w: el.clientWidth, h: el.clientHeight, vh: window.innerHeight });
         measure();
         if (typeof ResizeObserver === "undefined") {
             window.addEventListener("resize", measure);
@@ -119,48 +147,113 @@ export function WallGrid({ data, page, columns, now, flashes = {}, highlightMs =
         }
         const ro = new ResizeObserver(measure);
         ro.observe(el);
-        if (el.parentElement) ro.observe(el.parentElement);
-        return () => ro.disconnect();
+        window.addEventListener("resize", measure);
+        return () => {
+            ro.disconnect();
+            window.removeEventListener("resize", measure);
+        };
     }, []);
-
-    const colW = box.w ? (box.w - GAP * (columns - 1)) / columns : 0;
-    // Fill the screen, but never taller than a little more than wide (no tall towers)
-    const rowH = fill && box.h && colW ? Math.floor(clamp((box.h - GAP * (rows - 1)) / rows, 110, Math.max(130, colW * 0.85))) : rowHeight;
-
-    if (!page.tiles.length) {
-        return (
-            <div ref={ref} className="grid h-full min-h-40 place-items-center rounded-2xl border border-dashed text-sm" style={{ borderColor: "var(--w-border)", color: "var(--w-muted)" }}>
-                Nothing on this page yet
-            </div>
-        );
-    }
-
+    const s = box.w ? (fit === "width" ? Math.min(box.w / w, maxVh && box.vh ? (box.vh * maxVh) / h : Infinity) : Math.min(box.w / w, box.h / h)) : 0;
     return (
-        <div ref={ref} className="grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gridAutoRows: `${rowH}px`, gridAutoFlow: "dense", gap: GAP }}>
-            {page.tiles.map((t) => {
-                const span = SIZE_SPAN[t.size] || SIZE_SPAN.s;
-                const c = Math.min(span.c, columns);
-                const w = colW ? colW * c + GAP * (c - 1) : 0;
-                const h = rowH * span.r + GAP * (span.r - 1);
-                const changed = flashes[t.id];
-                const highlighted = !!changed && now - changed < highlightMs;
+        <div ref={ref} className={cn("relative overflow-hidden", className)} style={{ ...style, ...(fit === "width" ? { height: s ? h * s : undefined } : {}) }}>
+            {s > 0 && (
+                <div style={{ position: "absolute", left: (box.w - w * s) / 2, top: fit === "width" ? 0 : (box.h - h * s) / 2, width: w, height: h, transform: `scale(${s})`, transformOrigin: "0 0" }}>
+                    {children(s)}
+                </div>
+            )}
+        </div>
+    );
+}
+
+interface StageProps {
+    data: WallData;
+    items: { t: Placed; r: Rect }[];
+    frames?: { g: WallGroup; r: Rect }[];
+    now: number;
+    textScale?: number;
+    /** tileId -> time of its last change (restarts the highlight) */
+    flashes?: Record<string, number>;
+    highlightMs?: number;
+    selected?: string | null;
+    /** frames are a little smaller on phones */
+    groupScale?: number;
+    /** the editor wraps tiles and groups to make them draggable */
+    renderTile?: (t: Placed, rect: Rect, card: React.ReactNode) => React.ReactNode;
+    renderGroup?: (g: WallGroup, rect: Rect, frame: React.ReactNode) => React.ReactNode;
+}
+
+/** Group frames, then tiles, at their places. Inside a ScaledStage: sizes are stage units. */
+export function StageTiles({ data, items, frames = [], now, textScale = 1, flashes = {}, highlightMs = 6000, selected, groupScale = 1, renderTile, renderGroup }: StageProps) {
+    return (
+        <>
+            {frames.map(({ g, r }) => {
+                const frame = <GroupFrame group={g} k={groupScale} selected={selected === g.id} />;
+                if (renderGroup) return <Fragment key={g.id}>{renderGroup(g, r, frame)}</Fragment>;
                 return (
-                    <div
-                        key={t.id}
-                        className={cn("relative min-w-0", editor && "cursor-pointer")}
-                        style={{ gridColumn: `span ${c}`, gridRow: `span ${span.r}` }}
-                        onClick={editor ? () => editor.onSelect(t.id) : undefined}
-                        onKeyDown={editor ? (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), editor.onSelect(t.id)) : undefined}
-                        role={editor ? "button" : undefined}
-                        tabIndex={editor ? 0 : undefined}
-                        aria-label={editor ? `Edit tile ${tileLabel(t)}` : undefined}
-                    >
-                        {w > 0 && <TileCard tile={t} data={data} now={now} w={w} h={h} scale={textScale} changedAt={changed} highlighted={highlighted} selected={editor?.selected === t.id} />}
-                        {editor?.actions && <div className="absolute right-2 top-2 z-10">{editor.actions(t)}</div>}
+                    <div key={g.id} style={{ position: "absolute", ...r }}>
+                        {frame}
                     </div>
                 );
             })}
+            {items.map(({ t, r }) => {
+                const changed = flashes[t.id];
+                const card = <TileCard tile={t} data={data} now={now} w={r.width} h={r.height} scale={textScale} changedAt={changed} highlighted={!!changed && now - changed < highlightMs} selected={selected === t.id} />;
+                if (renderTile) return <Fragment key={t.id}>{renderTile(t, r, card)}</Fragment>;
+                return (
+                    <div key={t.id} style={{ position: "absolute", ...r }}>
+                        {card}
+                    </div>
+                );
+            })}
+        </>
+    );
+}
+
+/** A group: a tinted frame with its icon and name on top. */
+export function GroupFrame({ group, k = 1, selected }: { group: WallGroup; k?: number; selected?: boolean }) {
+    const c = group.color;
+    const head = GROUP.head * k;
+    const icon = head * 0.62;
+    return (
+        <div
+            className="h-full w-full border"
+            style={{
+                borderRadius: 24 * k,
+                borderWidth: 2 * k,
+                borderColor: alpha(c, "80", "var(--w-border)"),
+                background: alpha(c, "14", "var(--w-card-2)"),
+                boxShadow: selected ? "0 0 0 3px var(--w-accent)" : undefined,
+            }}
+        >
+            <div className="flex items-center" style={{ height: head, padding: `0 ${GROUP.pad * k + 4}px`, gap: 12 * k }}>
+                {group.icon && (
+                    <span className="grid shrink-0 place-items-center overflow-hidden" style={{ width: icon, height: icon, fontSize: icon * 0.78, color: c || "var(--w-text)", borderRadius: icon * 0.25 }}>
+                        <IconRef value={group.icon} className="h-full w-full" />
+                    </span>
+                )}
+                <span className="min-w-0 truncate font-semibold" style={{ fontSize: 26 * k, color: "var(--w-text)" }}>{group.label || "Group"}</span>
+            </div>
         </div>
+    );
+}
+
+/** Title, page and clock across the top of the stage. `k` scales it (smaller on phones). */
+export function StageHeader({ title, sub, now, showClock, right, k = 1, pad = STAGE.pad, height = STAGE.header }: { title: string; sub?: string | null; now: number; showClock: boolean; right?: React.ReactNode; k?: number; pad?: number; height?: number }) {
+    const d = new Date(now);
+    return (
+        <header className="absolute flex items-center" style={{ left: pad + 4, right: pad + 4, top: pad, height: height - 16 * k, gap: 20 * k }}>
+            <div className="min-w-0 flex-1">
+                <h1 className="truncate font-semibold" style={{ fontSize: 34 * k, lineHeight: 1.15, letterSpacing: "-0.01em" }}>{title}</h1>
+                {sub && <div className="truncate" style={{ fontSize: 18 * k, color: "var(--w-muted)" }}>{sub}</div>}
+            </div>
+            {right}
+            {showClock && (
+                <div className="shrink-0 text-right tabular-nums">
+                    <div className="font-semibold" style={{ fontSize: 34 * k, lineHeight: 1.1 }}>{d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                    <div style={{ fontSize: 16 * k, color: "var(--w-muted)" }}>{d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}</div>
+                </div>
+            )}
+        </header>
     );
 }
 
@@ -183,11 +276,11 @@ interface Dims {
 
 function dims(w: number, h: number, scale: number): Dims {
     const m = Math.min(w, h);
-    const pad = clamp(m * 0.09, 12, 28);
+    const pad = clamp(m * 0.085, 12, 32);
     const iw = w - pad * 2;
     const ih = h - pad * 2;
-    const label = clamp(m * 0.085 * scale, 12, 26);
-    const small = clamp(m * 0.062 * scale, 11, 18);
+    const label = clamp(m * 0.08 * scale, 13, 34);
+    const small = clamp(m * 0.058 * scale, 12, 24);
     const body = Math.max(20, ih - label * 1.9 - small * 1.8);
     return { w, h, pad, iw, ih, label, small, body, scale };
 }
@@ -211,14 +304,17 @@ function TileCard({ tile, data, now, w, h, scale, changedAt, highlighted, select
     const level = tileLevel(tile, v);
     const stale = (tile.type === "sensor" || tile.type === "actuator") && !!dev && !dev.online;
     const on = tile.type === "actuator" && isActuatorValue(v) && v.on;
+    const custom = tile.bg && /^#[0-9a-f]{6}$/i.test(tile.bg) ? tile.bg : null;
+    const image = tile.type === "image" && !tile.unavailable;
 
-    const bg = level === "critical" ? "var(--w-crit-bg)" : level === "warn" ? "var(--w-warn-bg)" : on ? "var(--w-on-bg)" : "var(--w-card)";
-    const border = level === "critical" ? "var(--w-crit)" : level === "warn" ? "var(--w-warn)" : highlighted ? "var(--w-hl)" : "var(--w-border)";
+    // Alerts win over a custom colour: a red tile must look red
+    const bg = level === "critical" ? "var(--w-crit-bg)" : level === "warn" ? "var(--w-warn-bg)" : custom || (on ? "var(--w-on-bg)" : "var(--w-card)");
+    const border = level === "critical" ? "var(--w-crit)" : level === "warn" ? "var(--w-warn)" : highlighted ? "var(--w-hl)" : custom ? "transparent" : "var(--w-border)";
 
     return (
         <div
             className={cn("relative flex h-full flex-col overflow-hidden rounded-[18px] border transition-colors duration-500", level === "critical" && "wall-alarm")}
-            style={{ background: bg, borderColor: border, padding: d.pad, boxShadow: selected ? "0 0 0 3px var(--w-accent)" : undefined }}
+            style={{ ...(custom && level === "ok" ? onColour(custom) : {}), background: bg, borderColor: border, padding: image ? 0 : d.pad, boxShadow: selected ? "0 0 0 3px var(--w-accent)" : undefined }}
         >
             {tile.unavailable ? (
                 <Unavailable tile={tile} d={d} />
@@ -230,6 +326,10 @@ function TileCard({ tile, data, now, w, h, scale, changedAt, highlighted, select
                 <StatusBody tile={tile} dev={dev} now={now} d={d} />
             ) : tile.type === "clock" ? (
                 <ClockBody tile={tile} now={now} d={d} />
+            ) : tile.type === "graph" ? (
+                <GraphBody tile={tile} data={data} now={now} d={d} />
+            ) : tile.type === "image" ? (
+                <ImageBody tile={tile} d={d} />
             ) : (
                 <TextBody tile={tile} d={d} />
             )}
@@ -244,12 +344,28 @@ function TileCard({ tile, data, now, w, h, scale, changedAt, highlighted, select
     );
 }
 
+/** A big icon next to the value (tiles set to medium or large icons). */
+function bigIconSize(tile: WallTile, d: Dims): number {
+    if (tile.iconSize !== "md" && tile.iconSize !== "lg") return 0;
+    const f = tile.iconSize === "lg" ? 0.95 : 0.62;
+    return Math.max(24, Math.min(d.body * f, d.iw * (tile.iconSize === "lg" ? 0.42 : 0.3)));
+}
+
+function BigIcon({ tile, size, fallback, color }: { tile: WallTile; size: number; fallback: any; color: string }) {
+    if (!size) return null;
+    return (
+        <span className="grid shrink-0 place-items-center overflow-hidden transition-colors duration-500" style={{ width: size, height: size, fontSize: size * 0.82, color, borderRadius: size * 0.22 }}>
+            <IconRef value={tile.icon} fallback={fallback} className="h-full w-full" />
+        </span>
+    );
+}
+
 /** Icon chip + label, with an optional badge on the right. */
-function Head({ tile, d, fallback, badge, label }: { tile: WallTile; d: Dims; fallback: any; badge?: React.ReactNode; label?: string }) {
+function Head({ tile, d, fallback, badge, label, noIcon }: { tile: WallTile; d: Dims; fallback: any; badge?: React.ReactNode; label?: string; noIcon?: boolean }) {
     const chip = Math.round(d.label * 1.65);
     return (
         <div className="flex min-w-0 shrink-0 items-center" style={{ gap: d.label * 0.55, height: chip }}>
-            <span
+            {!noIcon && <span
                 className="grid shrink-0 place-items-center overflow-hidden"
                 style={{ width: chip, height: chip, borderRadius: chip * 0.3, background: alpha(tile.color, "26", "var(--w-card-2)"), color: tile.color || "var(--w-muted)" }}
             >
@@ -260,7 +376,7 @@ function Head({ tile, d, fallback, badge, label }: { tile: WallTile; d: Dims; fa
                         <IconRef value={tile.icon} fallback={fallback} className="h-full w-full" />
                     </span>
                 )}
-            </span>
+            </span>}
             <span className="min-w-0 flex-1 truncate font-medium" style={{ fontSize: d.label, color: "var(--w-muted)", lineHeight: 1.2 }}>
                 {label ?? tileLabel(tile)}
             </span>
@@ -290,7 +406,7 @@ function Footer({ d, warn, children }: { d: Dims; warn?: boolean; children: Reac
 function BigValue({ text, unit, d, height, color }: { text: string; unit?: string | null; d: Dims; height: number; color: string }) {
     const unitText = unit ? ` ${unit}` : "";
     // Unit is drawn at ~40% size, so it counts as fewer characters
-    const size = fit(text + "x".repeat(Math.ceil(unitText.length * 0.45)), d.iw, height * 0.8, 128 * d.scale, 0.58);
+    const size = fit(text + "x".repeat(Math.ceil(unitText.length * 0.45)), d.iw, height * 0.8, 220 * d.scale, 0.58);
     return (
         <div className="flex min-w-0 items-baseline font-semibold tabular-nums" style={{ color, lineHeight: 1, letterSpacing: "-0.02em" }}>
             <span key={text} className="ts-tick whitespace-nowrap" style={{ fontSize: size }}>{text}</span>
@@ -326,11 +442,14 @@ function SensorBody({ tile, v, level, history, d }: { tile: WallTile; v: TileVal
             </>
         );
     }
+    const icon = bigIconSize(tile, d);
+    const gap = icon ? d.label * 0.8 : 0;
     return (
         <>
-            <Head tile={tile} d={d} fallback={Bell} badge={badge} />
-            <div className="flex min-h-0 flex-1 items-center">
-                <BigValue text={text} unit={tile.unit} d={d} height={Math.min(d.body, d.iw * 0.38)} color={color} />
+            <Head tile={tile} d={d} fallback={Bell} badge={badge} noIcon={!!icon} />
+            <div className="flex min-h-0 flex-1 items-center" style={{ gap }}>
+                <BigIcon tile={tile} size={icon} fallback={Bell} color={tile.color || "var(--w-muted)"} />
+                <BigValue text={text} unit={tile.unit} d={{ ...d, iw: d.iw - icon - gap }} height={Math.min(d.body, (d.iw - icon - gap) * 0.38)} color={color} />
             </div>
         </>
     );
@@ -348,7 +467,7 @@ function Gauge({ tile, v, color, d }: { tile: WallTile; v: number; color: string
     // The arc is 120 × 66; size it to the space, keep room for the number under it
     const gw = Math.min(d.iw, (d.body - 4) * 1.8);
     const num = formatNumber(v, tile.decimals);
-    const size = fit(num + (tile.unit ? "xx" : ""), gw * 0.55, gw * 0.2, 80 * d.scale, 0.58);
+    const size = fit(num + (tile.unit ? "xx" : ""), gw * 0.55, gw * 0.2, 140 * d.scale, 0.58);
     return (
         <div className="relative flex min-h-0 flex-1 items-end justify-center">
             <svg viewBox="0 0 120 66" width={gw} height={gw * 0.55} aria-hidden>
@@ -397,10 +516,26 @@ function ActuatorBody({ tile, v, d }: { tile: WallTile; v: TileValue; d: Dims })
     const on = !!a?.on;
     const state = a ? (on ? "ON" : "OFF") : "—";
     // A switch drawn next to the state, both sized to the space
-    const size = fit(state + "xxxx", d.iw, Math.min(d.body, d.iw * 0.4) * 0.6, 96 * d.scale, 0.62);
+    const size = fit(state + "xxxx", d.iw, Math.min(d.body, d.iw * 0.4) * 0.6, 150 * d.scale, 0.62);
     const trackW = size * 1.7;
     const trackH = size * 0.95;
     const knob = trackH - 6;
+    const icon = bigIconSize(tile, d);
+    if (icon) {
+        // The big icon lights up when it's on, instead of the switch
+        const text = fit(state + "xx", d.iw - icon - d.label, Math.min(d.body, d.iw * 0.4) * 0.6, 150 * d.scale, 0.62);
+        return (
+            <>
+                <Head tile={tile} d={d} fallback={Power} noIcon badge={a ? <Badge d={d} color="var(--w-muted)">{a.auto ? "Auto" : "Manual"}</Badge> : null} />
+                <div className="flex min-h-0 flex-1 items-center" style={{ gap: d.label * 0.8 }}>
+                    <span className="transition-opacity duration-500" style={{ opacity: on ? 1 : 0.45, filter: on ? undefined : "grayscale(1)" }}>
+                        <BigIcon tile={tile} size={icon} fallback={Power} color={on ? tile.color || "var(--w-on)" : "var(--w-muted)"} />
+                    </span>
+                    <span className="font-semibold tracking-tight" style={{ fontSize: text, lineHeight: 1, color: on ? "var(--w-on)" : "var(--w-muted)" }}>{state}</span>
+                </div>
+            </>
+        );
+    }
     return (
         <>
             <Head tile={tile} d={d} fallback={Power} badge={a ? <Badge d={d} color="var(--w-muted)">{a.auto ? "Auto" : "Manual"}</Badge> : null} />
@@ -425,12 +560,15 @@ function StatusBody({ tile, dev, now, d }: { tile: WallTile; dev?: { name: strin
     const online = !!dev?.online;
     const word = online ? "Online" : "Offline";
     const color = online ? "var(--w-on)" : "var(--w-crit)";
-    const size = fit(word + "xx", d.iw, Math.min(d.body, d.iw * 0.3) * 0.6, 60 * d.scale, 0.6);
+    const icon = bigIconSize(tile, d) ? Math.min(bigIconSize(tile, d), d.body * 0.8) : 0;
+    const room = d.iw - (icon ? icon + d.label * 0.8 : 0);
+    const size = fit(word + "xxx", room, Math.min(d.body, room * 0.3) * 0.6, 90 * d.scale, 0.6);
     const dot = Math.max(10, size * 0.42);
     return (
         <>
-            <Head tile={tile} d={d} fallback={Wifi} label={tile.label || dev?.name || "Device"} />
+            <Head tile={tile} d={d} fallback={Wifi} label={tile.label || dev?.name || "Device"} noIcon={!!icon} />
             <div className="flex min-h-0 flex-1 items-center" style={{ gap: size * 0.4 }}>
+                <BigIcon tile={tile} size={icon} fallback={Wifi} color={tile.color || color} />
                 <span className="relative flex shrink-0" style={{ width: dot, height: dot }} aria-hidden>
                     {online && <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-40 motion-reduce:hidden" style={{ background: color }} />}
                     <span className="relative inline-flex rounded-full" style={{ width: dot, height: dot, background: color }} />
@@ -447,7 +585,7 @@ function ClockBody({ tile, now, d }: { tile: WallTile; now: number; d: Dims }) {
     const hm = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const date = t.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
     const avail = tile.label ? d.body : d.ih - d.small * 2;
-    const size = fit(hm + "x", d.iw * 0.9, avail * 0.62, 150 * d.scale, 0.56);
+    const size = fit(hm + "x", d.iw * 0.9, avail * 0.62, 260 * d.scale, 0.56);
     return (
         <div className="flex h-full min-h-0 flex-col">
             {tile.label && <Head tile={tile} d={d} fallback={Clock3} />}
@@ -456,8 +594,150 @@ function ClockBody({ tile, now, d }: { tile: WallTile; now: number; d: Dims }) {
                     <span style={{ fontSize: size }}>{hm}</span>
                     <span className="ml-1" style={{ fontSize: Math.max(11, size * 0.3), color: "var(--w-muted)" }}>{String(t.getSeconds()).padStart(2, "0")}</span>
                 </div>
-                <div className="truncate" style={{ fontSize: clamp(size * 0.22, 12, 28), color: "var(--w-muted)", marginTop: size * 0.12 }}>{date}</div>
+                <div className="truncate" style={{ fontSize: clamp(size * 0.22, 13, 40), color: "var(--w-muted)", marginTop: size * 0.12 }}>{date}</div>
             </div>
+        </div>
+    );
+}
+
+/** Round axis steps: 1, 2, 2.5 or 5 × 10ⁿ. */
+function niceTicks(lo: number, hi: number, count = 4): number[] {
+    if (!(hi > lo)) return [lo];
+    const raw = (hi - lo) / count;
+    const mag = 10 ** Math.floor(Math.log10(raw));
+    const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((x) => x >= raw) || raw;
+    const out: number[] = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(Math.round(v * 1e6) / 1e6);
+    return out;
+}
+
+function timeLabel(ms: number, rangeH: number): string {
+    const d = new Date(ms);
+    if (rangeH > 24) return d.toLocaleDateString([], { weekday: "short", day: "numeric" });
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Up to four readings over time, with axes and a legend showing each one's latest value. */
+function GraphBody({ tile, data, now, d }: { tile: WallTile; data: WallData; now: number; d: Dims }) {
+    const series = (tile.series || []).map((x, i) => ({ ...x, color: x.color || SERIES_COLORS[i % 4], points: (data.history[x.id || ""] || []) as [number, number][] }));
+    const rangeMs = (tile.rangeH || 24) * 3600 * 1000;
+    const x0 = now - rangeMs;
+    const all = series.flatMap((x) => x.points.filter((p) => p[0] >= x0).map((p) => p[1]));
+    let lo = tile.min ?? (all.length ? Math.min(...all) : 0);
+    let hi = tile.max ?? (all.length ? Math.max(...all) : 1);
+    if (tile.min == null && tile.max == null) {
+        const padY = (hi - lo) * 0.12 || Math.abs(hi) * 0.1 || 1;
+        lo -= padY;
+        hi += padY;
+    } else if (!(hi > lo)) hi = lo + 1;
+    const ticks = niceTicks(lo, hi, d.ih > 260 ? 4 : 2);
+
+    const legendFont = clamp(d.small * 1.05, 12, 26);
+    const legendH = legendFont * 1.6;
+    const axisFont = clamp(d.small * 0.85, 11, 20);
+    const yLabelW = axisFont * 0.6 * Math.max(...ticks.map((t) => formatNumber(t, tile.decimals).length), 2) + axisFont * 0.6;
+    const W = d.iw;
+    const H = Math.max(40, d.ih - d.label * 1.65 - d.label * 0.5 - legendH - axisFont * 1.6);
+    const px = (t: number) => yLabelW + ((t - x0) / rangeMs) * (W - yLabelW);
+    const py = (v: number) => H - ((v - lo) / (hi - lo)) * H;
+    const narrow = W - yLabelW < axisFont * 20;
+    const xt = (narrow ? [0, 1] : [0, 1 / 3, 2 / 3, 1]).map((f) => x0 + f * rangeMs);
+    const multi = series.length > 1;
+    // Bars: readings averaged into even time slots
+    const slots = Math.max(6, Math.min(48, Math.floor((W - yLabelW) / (axisFont * 1.6))));
+    const slotMs = rangeMs / slots;
+    const slotW = (W - yLabelW) / slots;
+    const barW = Math.max(2, (slotW * 0.72) / (multi ? series.length : 1));
+    const binned = (pts: [number, number][]) => {
+        const sum = new Map<number, { v: number; n: number }>();
+        for (const [t, v] of pts) {
+            const i = Math.min(slots - 1, Math.floor((t - x0) / slotMs));
+            const b = sum.get(i) || { v: 0, n: 0 };
+            b.v += v;
+            b.n++;
+            sum.set(i, b);
+        }
+        return [...sum].map(([i, b]) => [i, b.v / b.n] as [number, number]);
+    };
+
+    return (
+        <>
+            <Head tile={tile} d={d} fallback={LineChart} />
+            <div className="flex min-w-0 shrink-0 items-center overflow-hidden" style={{ gap: legendFont, height: legendH, marginTop: d.label * 0.5, fontSize: legendFont }}>
+                {series.map((x) => {
+                    const last = x.points[x.points.length - 1];
+                    return (
+                        <span key={x.id} className="flex min-w-0 items-center whitespace-nowrap" style={{ gap: legendFont * 0.4 }}>
+                            <span className="shrink-0 rounded-full" style={{ width: legendFont * 0.6, height: legendFont * 0.6, background: x.color }} />
+                            {multi && <span className="truncate" style={{ color: "var(--w-muted)" }}>{x.label}</span>}
+                            <span className="font-semibold tabular-nums">{last ? formatNumber(last[1], tile.decimals) : "—"}{x.unit ? ` ${x.unit}` : ""}</span>
+                        </span>
+                    );
+                })}
+            </div>
+            <svg width={W} height={H + axisFont * 1.6} className="mt-auto block overflow-visible" aria-hidden style={{ fontSize: axisFont }}>
+                {ticks.map((t) => (
+                    <g key={t}>
+                        <line x1={yLabelW} x2={W} y1={py(t)} y2={py(t)} stroke="var(--w-border)" strokeWidth={1} />
+                        <text x={yLabelW - axisFont * 0.4} y={py(t)} dy="0.35em" textAnchor="end" fill="var(--w-faint)">{formatNumber(t, tile.decimals)}</text>
+                    </g>
+                ))}
+                {xt.map((t, i) => (
+                    <text key={i} x={px(t)} y={H + axisFont * 1.3} textAnchor={i === 0 ? "start" : i === xt.length - 1 ? "end" : "middle"} fill="var(--w-faint)">{i === xt.length - 1 ? "now" : timeLabel(t, tile.rangeH || 24)}</text>
+                ))}
+                {series.map((x, si) => {
+                    const pts = x.points.filter((p) => p[0] >= x0);
+                    if (!pts.length) return null;
+                    if (tile.chart === "bar") {
+                        return (
+                            <g key={x.id} fill={x.color}>
+                                {binned(pts).map(([i, v]) => {
+                                    const y = py(Math.max(lo, Math.min(hi, v)));
+                                    const base = py(Math.max(lo, Math.min(hi, lo <= 0 && hi >= 0 ? 0 : lo)));
+                                    const left = yLabelW + i * slotW + (slotW - barW * (multi ? series.length : 1)) / 2 + si * barW;
+                                    return <rect key={i} x={left} y={Math.min(y, base)} width={barW} height={Math.max(1, Math.abs(base - y))} rx={Math.min(4, barW / 4)} />;
+                                })}
+                            </g>
+                        );
+                    }
+                    const line = pts.map((p, i) => `${i ? "L" : "M"} ${px(p[0]).toFixed(1)} ${py(p[1]).toFixed(1)}`).join(" ");
+                    return (
+                        <g key={x.id}>
+                            {tile.chart !== "line" && <path d={`${line} L ${px(pts[pts.length - 1][0]).toFixed(1)} ${H} L ${px(pts[0][0]).toFixed(1)} ${H} Z`} fill={x.color} opacity={multi ? 0.08 : 0.16} />}
+                            <path d={line} fill="none" stroke={x.color} strokeWidth={Math.max(2, d.small * 0.18)} strokeLinejoin="round" strokeLinecap="round" />
+                            <circle cx={px(pts[pts.length - 1][0])} cy={py(pts[pts.length - 1][1])} r={Math.max(3, d.small * 0.28)} fill={x.color} />
+                        </g>
+                    );
+                })}
+                {!all.length && (
+                    <text x={(yLabelW + W) / 2} y={H / 2} textAnchor="middle" fill="var(--w-faint)">No readings in this time yet</text>
+                )}
+            </svg>
+        </>
+    );
+}
+
+/** A picture filling the tile, with its label as a caption. */
+function ImageBody({ tile, d }: { tile: WallTile; d: Dims }) {
+    const id = /^file:([a-f0-9]{32})$/.exec(tile.image || "")?.[1];
+    return (
+        <div className="relative h-full w-full" style={{ background: tile.fit === "contain" ? "var(--w-card-2)" : undefined }}>
+            {id ? (
+                // eslint-disable-next-line @next/next/no-img-element -- user upload served by the backend
+                <img src={fileUrl(id)} alt={tile.label || ""} className="h-full w-full" style={{ objectFit: tile.fit === "contain" ? "contain" : "cover" }} draggable={false} />
+            ) : (
+                <div className="grid h-full place-items-center" style={{ color: "var(--w-faint)" }}>
+                    <ImageIcon style={{ width: d.label * 2.4, height: d.label * 2.4 }} />
+                </div>
+            )}
+            {tile.label && (
+                <div
+                    className="absolute inset-x-0 bottom-0 truncate font-semibold"
+                    style={{ padding: `${d.label * 2}px ${d.pad}px ${d.pad * 0.8}px`, fontSize: d.label * 1.05, color: "#fff", background: "linear-gradient(transparent, rgba(0,0,0,.72))" }}
+                >
+                    {tile.label}
+                </div>
+            )}
         </div>
     );
 }
@@ -467,7 +747,7 @@ function TextBody({ tile, d }: { tile: WallTile; d: Dims }) {
     const avail = tile.label ? d.body + d.small * 1.8 : d.ih;
     // Font size at which the text fills the box: lines × lineHeight ≤ height
     // (0.8: words wrap early, so lines are shorter than the full width)
-    const size = clamp(0.8 * Math.sqrt((d.iw * avail) / (Math.max(text.length, 8) * 0.56 * 1.35)), 12, 36 * d.scale);
+    const size = clamp(0.8 * Math.sqrt((d.iw * avail) / (Math.max(text.length, 8) * 0.56 * 1.35)), 13, 56 * d.scale);
     return (
         <>
             {tile.label && <Head tile={tile} d={d} fallback={StickyNote} />}
@@ -487,23 +767,31 @@ function Unavailable({ tile, d }: { tile: WallTile; d: Dims }) {
     );
 }
 
-/* ─────────────────────────────── Event feed ─────────────────────────────── */
+/* ─────────────────────────────── Notifications ─────────────────────────────── */
 
-export function FeedList({ events, now, compact }: { events: FeedEvent[]; now: number; compact?: boolean }) {
-    if (!events.length) {
-        return <p className="px-1 text-sm" style={{ color: "var(--w-faint)" }}>Switches turning on or off, readings crossing a limit and devices going offline show up here.</p>;
-    }
+export interface Toast {
+    e: FeedEvent;
+    leaving?: boolean;
+}
+
+/** Pop-up notifications in the stage's bottom-right corner; each one fades out by itself. */
+export function StageToasts({ items, now, stageW, k = 1, pad = STAGE.pad }: { items: Toast[]; now: number; stageW: number; k?: number; pad?: number }) {
+    if (!items.length) return null;
     return (
-        <ol className={cn("space-y-2", compact && "flex gap-2 space-y-0")}>
-            {events.map((e) => {
-                const color = e.level === "critical" ? "var(--w-crit)" : e.level === "warn" ? "var(--w-warn)" : e.level === "ok" ? "var(--w-on)" : "var(--w-muted)";
+        <ol className="pointer-events-none absolute z-20 flex flex-col justify-end" style={{ right: pad, bottom: pad, width: Math.min(620 * k, stageW - pad * 2), gap: 12 * k }} role="status" aria-live="polite">
+            {items.map(({ e, leaving }) => {
+                const color = e.level === "critical" ? "var(--w-crit)" : e.level === "warn" ? "var(--w-warn)" : e.level === "ok" ? "var(--w-on)" : "var(--w-accent)";
                 const Icon = e.level === "critical" || e.level === "warn" ? AlertTriangle : e.level === "ok" ? CheckCircle2 : e.kind === "actuator" ? Power : Bell;
                 return (
-                    <li key={e.id} className={cn("wall-feed-in flex items-start gap-2.5 rounded-xl border px-3 py-2.5", compact && "shrink-0")} style={{ borderColor: "var(--w-border)", background: "var(--w-card)" }}>
-                        <Icon className="mt-0.5 h-4 w-4 shrink-0" style={{ color }} />
-                        <div className="min-w-0">
-                            <div className="text-sm font-medium leading-snug" style={{ color: "var(--w-text)" }}>{e.text}</div>
-                            <div className="text-xs tabular-nums" style={{ color: "var(--w-muted)" }}>
+                    <li
+                        key={e.id}
+                        className={cn("flex items-center border", leaving ? "wall-toast-out" : "wall-feed-in")}
+                        style={{ gap: 16 * k, padding: `${16 * k}px ${20 * k}px`, borderRadius: 18 * k, background: "var(--w-card)", borderColor: "var(--w-border)", borderLeft: `${6 * k}px solid ${color}`, boxShadow: "0 12px 40px rgba(0,0,0,.35)" }}
+                    >
+                        <Icon className="shrink-0" style={{ color, width: 34 * k, height: 34 * k }} />
+                        <div className="min-w-0 flex-1">
+                            <div className="font-semibold" style={{ fontSize: 26 * k, lineHeight: 1.25, color: "var(--w-text)" }}>{e.text}</div>
+                            <div className="tabular-nums" style={{ fontSize: 17 * k, color: "var(--w-muted)", marginTop: 2 * k }}>
                                 {new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {ago(e.at, now)}
                             </div>
                         </div>
